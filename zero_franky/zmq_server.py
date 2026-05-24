@@ -44,7 +44,14 @@ class RobotManager:
         return self._robot(robot_id).recover_from_errors()
 
     def join_motion(self, robot_id: str, timeout: float | None):
-        return self._robot(robot_id).join_motion(timeout)
+        try:
+            return self._robot(robot_id).join_motion(timeout)
+        except self._franky.ControlException as e:
+            # stop() preempts the active motion; libfranka stores the exception and
+            # re-raises it on the next join_motion call. Treat preempt as a clean stop.
+            if "preempted" in str(e).lower():
+                return False
+            raise
 
     def poll_motion(self, robot_id: str):
         return self._robot(robot_id).poll_motion()
@@ -113,6 +120,7 @@ class RobotManager:
 
     def stop_tracker(self, session_id: str, join_timeout: float | None = 1.0):
         self._tracker_session(session_id).stop(join_timeout)
+        self._tracker_sessions.pop(session_id, None)
         return True
 
     def set_joint_tracker_reference(
