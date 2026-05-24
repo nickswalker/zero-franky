@@ -172,44 +172,42 @@ class RobotProxy:
 
     def start_joint_impedance_session(
         self,
-        policy,
+        policy=None,
         *,
         policy_transport: str = "import",
         period: float = 0.001,
         stop_on_policy_error: bool = True,
         **motion_kwargs,
     ) -> TrackerSessionProxy:
-        session_id = self._client.call(
-            "robot.start_joint_tracker",
-            {
-                "robot_id": self._id,
-                "policy": encode_policy(policy, policy_transport),
-                "motion_kwargs": motion_kwargs,
-                "period": period,
-                "stop_on_policy_error": stop_on_policy_error,
-            },
-        )
+        params = {
+            "robot_id": self._id,
+            "motion_kwargs": motion_kwargs,
+            "period": period,
+            "stop_on_policy_error": stop_on_policy_error,
+        }
+        if policy is not None:
+            params["policy"] = encode_policy(policy, policy_transport)
+        session_id = self._client.call("robot.start_joint_tracker", params)
         return TrackerSessionProxy(self._client, session_id, "joint", push_socket=self._push_socket)
 
     def start_cartesian_impedance_session(
         self,
-        policy,
+        policy=None,
         *,
         policy_transport: str = "import",
         period: float = 0.001,
         stop_on_policy_error: bool = True,
         **motion_kwargs,
     ) -> TrackerSessionProxy:
-        session_id = self._client.call(
-            "robot.start_cartesian_tracker",
-            {
-                "robot_id": self._id,
-                "policy": encode_policy(policy, policy_transport),
-                "motion_kwargs": motion_kwargs,
-                "period": period,
-                "stop_on_policy_error": stop_on_policy_error,
-            },
-        )
+        params = {
+            "robot_id": self._id,
+            "motion_kwargs": motion_kwargs,
+            "period": period,
+            "stop_on_policy_error": stop_on_policy_error,
+        }
+        if policy is not None:
+            params["policy"] = encode_policy(policy, policy_transport)
+        session_id = self._client.call("robot.start_cartesian_tracker", params)
         return TrackerSessionProxy(self._client, session_id, "cartesian", push_socket=self._push_socket)
 
     def state_subscriber(self, topic: str = "robot.state", timeout_ms: int = 1000):

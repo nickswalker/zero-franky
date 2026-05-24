@@ -55,7 +55,7 @@ class RobotManager:
     def start_joint_tracker(
         self,
         robot_id: str,
-        policy_payload: dict[str, Any],
+        policy_payload: dict[str, Any] | None = None,
         motion_kwargs: dict[str, Any] | None = None,
         period: float = 0.001,
         stop_on_policy_error: bool = True,
@@ -72,7 +72,7 @@ class RobotManager:
             franky=self._franky,
             robot=robot,
             kind="joint",
-            policy_factory=load_policy(policy_payload),
+            policy_factory=load_policy(policy_payload) if policy_payload is not None else None,
             reference_handle=reference_handle,
             period=period,
             stop_on_policy_error=stop_on_policy_error,
@@ -83,7 +83,7 @@ class RobotManager:
     def start_cartesian_tracker(
         self,
         robot_id: str,
-        policy_payload: dict[str, Any],
+        policy_payload: dict[str, Any] | None = None,
         motion_kwargs: dict[str, Any] | None = None,
         period: float = 0.001,
         stop_on_policy_error: bool = True,
@@ -100,7 +100,7 @@ class RobotManager:
             franky=self._franky,
             robot=robot,
             kind="cartesian",
-            policy_factory=load_policy(policy_payload),
+            policy_factory=load_policy(policy_payload) if policy_payload is not None else None,
             reference_handle=reference_handle,
             period=period,
             stop_on_policy_error=stop_on_policy_error,
@@ -295,7 +295,7 @@ def handle_robot_get_last_teleop_state(manager: RobotManager, params: dict[str, 
 def handle_robot_start_joint_tracker(manager: RobotManager, params: dict[str, Any]):
     return manager.start_joint_tracker(
         params["robot_id"],
-        params["policy"],
+        params.get("policy"),
         params.get("motion_kwargs"),
         params.get("period", 0.001),
         params.get("stop_on_policy_error", True),
@@ -306,7 +306,7 @@ def handle_robot_start_joint_tracker(manager: RobotManager, params: dict[str, An
 def handle_robot_start_cartesian_tracker(manager: RobotManager, params: dict[str, Any]):
     return manager.start_cartesian_tracker(
         params["robot_id"],
-        params["policy"],
+        params.get("policy"),
         params.get("motion_kwargs"),
         params.get("period", 0.001),
         params.get("stop_on_policy_error", True),

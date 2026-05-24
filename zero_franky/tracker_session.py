@@ -32,6 +32,7 @@ def load_policy(policy_payload: dict[str, Any]) -> Callable[[Any], Any]:
 class TrackerSessionStatus:
     id: str
     kind: str
+    mode: str
     running: bool
     iterations: int
     error: str | None
@@ -40,6 +41,7 @@ class TrackerSessionStatus:
         return {
             "id": self.id,
             "kind": self.kind,
+            "mode": self.mode,
             "running": self.running,
             "iterations": self.iterations,
             "error": self.error,
@@ -53,7 +55,7 @@ class TrackerSession:
         franky: Any,
         robot: Any,
         kind: str,
-        policy_factory: Callable[[Any], Any],
+        policy_factory: Callable[[Any], Any] | None,
         reference_handle: Any,
         period: float,
         stop_on_policy_error: bool,
@@ -72,6 +74,8 @@ class TrackerSession:
         self._error: str | None = None
 
     def start(self) -> str:
+        if self._policy_factory is None:
+            return self.id
         self._thread = threading.Thread(target=self._run_policy, name=f"zero-franky-{self.kind}-{self.id}", daemon=True)
         self._thread.start()
         return self.id
@@ -85,8 +89,13 @@ class TrackerSession:
                 self._thread.join(join_timeout)
 
     def status(self) -> dict[str, Any]:
-        running = self._thread is not None and self._thread.is_alive()
-        return TrackerSessionStatus(self.id, self.kind, running, self._iterations, self._error).as_dict()
+        if self._policy_factory is None:
+            running = not self._stop_event.is_set()
+            mode = "passthrough"
+        else:
+            running = self._thread is not None and self._thread.is_alive()
+            mode = "policy"
+        return TrackerSessionStatus(self.id, self.kind, mode, running, self._iterations, self._error).as_dict()
 
     def set_joint_reference(
         self,
@@ -100,6 +109,8 @@ class TrackerSession:
         self._reference_handle.set(target, target_twist)
 
     def _run_policy(self):
+        if self._policy_factory is None:
+            return
         ctx = _TrackerContext(
             franky=self._franky,
             robot=self._robot,
