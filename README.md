@@ -114,7 +114,16 @@ topic, state = subscriber.recv()
 
 ## Tracker Sessions
 
-Tracker sessions are for `JointImpedanceTrackingMotion` and `CartesianImpedanceTrackingMotion`. They keep the impedance motion and reference handle on the robot host, then run a Python policy loop beside that handle. This avoids trying to servo over ZeroMQ while still letting client code define the policy.
+Tracker sessions are for `JointImpedanceTrackingMotion` and `CartesianImpedanceTrackingMotion`. They keep the impedance motion and reference handle on the robot host. By default, client code sets references through the returned proxy:
+
+```python
+with robot.start_joint_impedance_session(stiffness=[10.0] * 7, damping=[6.0] * 7) as session:
+    session.set_joint_reference(q, velocity=dq)
+```
+
+The proxy stops the tracker when the context block exits.
+
+A session can also run a Python policy loop beside the reference handle. This avoids trying to servo over ZeroMQ while still letting client code define the policy.
 
 There are two policy transports:
 
@@ -126,29 +135,46 @@ The built-in hold policies are importable:
 ```python
 from zero_franky.tracker_policies import hold_current_joint
 
-session = robot.start_joint_impedance_session(
+with robot.start_joint_impedance_session(
     hold_current_joint,
     stiffness=[10.0] * 7,
     damping=[6.0] * 7,
-)
+) as session:
+    status = session.status()
 ```
 
 Or it can be shipped with `cloudpickle` for exploratory work:
 
 ```python
-def hold_here(context):
-    q = list(context.robot.current_joint_positions)
+import math
 
-    def step(_context):
-        return {"position": q, "velocity": [0.0] * 7}
+
+def wiggle_joints(context):
+    q = list(context.robot.current_joint_positions)
+    amplitude = 0.03
+    frequency = 0.25
+    phase_offsets = [index * math.pi / 7.0 for index in range(7)]
+
+    def step(context):
+        omega = 2.0 * math.pi * frequency
+        position = [
+            q_i + amplitude * math.sin(omega * context.elapsed + phase)
+            for q_i, phase in zip(q, phase_offsets)
+        ]
+        velocity = [
+            amplitude * omega * math.cos(omega * context.elapsed + phase)
+            for phase in phase_offsets
+        ]
+        return {"position": position, "velocity": velocity}
 
     return step
 
-session = robot.start_joint_impedance_session(
-    hold_here,
+with robot.start_joint_impedance_session(
+    wiggle_joints,
     policy_transport="cloudpickle",
     stiffness=[10.0] * 7,
-)
+) as session:
+    status = session.status()
 ```
 
 `cloudpickle` policy transport executes client-provided Python on the robot host. Use it only on a trusted control network.
@@ -158,21 +184,13 @@ Cartesian sessions use the same policy shape and return an `Affine` target:
 ```python
 from zero_franky.tracker_policies import hold_current_cartesian
 
-session = robot.start_cartesian_impedance_session(
+with robot.start_cartesian_impedance_session(
     hold_current_cartesian,
     translational_stiffness=250.0,
     rotational_stiffness=25.0,
-)
+) as session:
+    status = session.status()
 ```
 
 The policy function receives a context with `franky`, `robot`, `elapsed`, `iterations`, and `stop()`. A factory may return a step function, or the policy may act directly as the step function. Joint steps return `{"position": q, "velocity": dq, "torque_feedforward": tau}`. Cartesian steps return `{"target": affine, "target_twist": twist}`.
 
-Sessions return a small proxy:
-
-```python
-status = session.status()
-session.set_joint_reference(q, velocity=dq)
-session.stop()
-```
-
-`set_joint_reference` and `set_cartesian_reference` are mainly useful for operator overrides or lower-rate supervision. High-rate behavior should live inside the remote policy loop.
