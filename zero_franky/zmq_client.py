@@ -7,7 +7,7 @@ import threading
 import msgpack
 import zmq
 
-from zero_franky.protocol import RpcRequest, encode_affine, encode_motion, encode_robot_velocity
+from zero_franky.protocol import RpcRequest, encode_affine, encode_motion, encode_robot_velocity, encode_rpc_value
 
 
 def encode_policy(policy, transport: str = "import") -> dict[str, Any]:
@@ -251,7 +251,7 @@ class RobotProxy:
     ) -> TrackerSessionProxy:
         params = {
             "robot_id": self._id,
-            "motion_kwargs": motion_kwargs,
+            "motion_kwargs": encode_rpc_value(motion_kwargs),
             "period": period,
             "stop_on_policy_error": stop_on_policy_error,
         }
@@ -271,7 +271,7 @@ class RobotProxy:
     ) -> TrackerSessionProxy:
         params = {
             "robot_id": self._id,
-            "motion_kwargs": motion_kwargs,
+            "motion_kwargs": encode_rpc_value(motion_kwargs),
             "period": period,
             "stop_on_policy_error": stop_on_policy_error,
         }

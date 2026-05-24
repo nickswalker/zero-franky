@@ -246,6 +246,9 @@ def build_joint_impedance_motion(franky, payload: dict[str, Any]):
         "constant_torque_offset",
         "lower_joint_limits",
         "upper_joint_limits",
+        "friction_coulomb",
+        "friction_viscous",
+        "friction_max_torque",
     )
     kwargs.update(
         {
@@ -255,6 +258,7 @@ def build_joint_impedance_motion(franky, payload: dict[str, Any]):
             "joint_limit_stiffness": payload["joint_limit_stiffness"],
             "joint_limit_damping": payload["joint_limit_damping"],
             "joint_limit_max_torque": payload["joint_limit_max_torque"],
+            "friction_velocity_epsilon": payload.get("friction_velocity_epsilon", 0.03),
         }
     )
     return franky.JointImpedanceMotion(payload["target"], **kwargs)

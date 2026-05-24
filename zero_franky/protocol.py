@@ -79,6 +79,22 @@ def encode_vector(value: Any | None) -> list[float] | None:
     return [float(item) for item in value]
 
 
+def encode_rpc_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, bytes, bool, int, float)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): encode_rpc_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [encode_rpc_value(item) for item in value]
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        return encode_rpc_value(tolist())
+    item = getattr(value, "item", None)
+    if callable(item):
+        return encode_rpc_value(item())
+    return value
+
+
 def encode_optional_float_vector(value: Any | None) -> list[float | None] | None:
     if value is None:
         return None
@@ -165,6 +181,10 @@ def encode_joint_impedance_fields(motion: Any) -> dict[str, Any]:
         "joint_limit_stiffness": float(motion.joint_limit_stiffness),
         "joint_limit_damping": float(motion.joint_limit_damping),
         "joint_limit_max_torque": float(motion.joint_limit_max_torque),
+        "friction_coulomb": encode_vector(getattr(motion, "friction_coulomb", None)),
+        "friction_viscous": encode_vector(getattr(motion, "friction_viscous", None)),
+        "friction_max_torque": encode_vector(getattr(motion, "friction_max_torque", None)),
+        "friction_velocity_epsilon": float(getattr(motion, "friction_velocity_epsilon", 0.03)),
     }
 
 
