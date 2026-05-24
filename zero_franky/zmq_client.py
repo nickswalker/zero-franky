@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 import inspect
+import threading
 
 import msgpack
 import zmq
@@ -144,6 +145,75 @@ class RobotProxy:
                 self._push_socket = push
         self._client = client
         self._id = self._client.call("robot.create", {"fci_hostname": fci_hostname, "kwargs": kwargs})
+        self._state_condition = threading.Condition()
+        self._latest_state: dict[str, Any] | None = None
+        self._state_stream_error: Exception | None = None
+        self._state_stream_stop = threading.Event()
+        self._state_stream_thread: threading.Thread | None = None
+
+    @property
+    def id(self) -> str:
+        return self._id
+
+    @property
+    def latest_state(self) -> dict[str, Any] | None:
+        with self._state_condition:
+            return self._latest_state
+
+    def wait_for_state(self, timeout: float | None = None) -> dict[str, Any]:
+        with self._state_condition:
+            self._state_condition.wait_for(
+                lambda: self._latest_state is not None or self._state_stream_error is not None,
+                timeout=timeout,
+            )
+            if self._state_stream_error is not None:
+                raise self._state_stream_error
+            if self._latest_state is None:
+                raise TimeoutError("Timed out waiting for robot state")
+            return self._latest_state
+
+    def start_state_stream(self, topic: str = "robot.state", timeout_ms: int = 250) -> None:
+        if self._state_stream_thread is not None and self._state_stream_thread.is_alive():
+            return
+        self._state_stream_stop.clear()
+        self._state_stream_error = None
+
+        def worker() -> None:
+            try:
+                subscriber = self.state_subscriber(topic=topic, timeout_ms=timeout_ms)
+            except Exception as exc:
+                self._set_state_stream_error(exc)
+                return
+
+            while not self._state_stream_stop.is_set():
+                try:
+                    _topic, state = subscriber.recv()
+                except Exception as exc:
+                    if type(exc).__name__ == "Again":
+                        continue
+                    self._set_state_stream_error(exc)
+                    break
+                with self._state_condition:
+                    self._latest_state = state
+                    self._state_condition.notify_all()
+
+        self._state_stream_thread = threading.Thread(
+            target=worker,
+            name=f"zero-franky-state-{self._id}",
+            daemon=True,
+        )
+        self._state_stream_thread.start()
+
+    def stop_state_stream(self, join_timeout: float | None = 1.0) -> None:
+        self._state_stream_stop.set()
+        thread = self._state_stream_thread
+        if thread is not None and threading.current_thread() is not thread:
+            thread.join(join_timeout)
+
+    def _set_state_stream_error(self, exc: Exception) -> None:
+        with self._state_condition:
+            self._state_stream_error = exc
+            self._state_condition.notify_all()
 
     def recover_from_errors(self):
         return self._client.call("robot.recover_from_errors", {"robot_id": self._id})
@@ -216,4 +286,4 @@ class RobotProxy:
 
         if cfg.PUB_PORT is None:
             raise RuntimeError("State subscription is disabled; call setup_zero_franky(ip, port) with a server using state PUB")
-        return StateSubscriber(cfg.IP, cfg.PUB_PORT, topic=topic, timeout_ms=timeout_ms)
+        return StateSubscriber(cfg.IP, cfg.PUB_PORT, topic=topic, timeout_ms=timeout_ms, robot_id=self._id)

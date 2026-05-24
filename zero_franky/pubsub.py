@@ -22,7 +22,15 @@ class StatePublisher:
 
 
 class StateSubscriber:
-    def __init__(self, host: str, port: int, topic: str = "robot.state", timeout_ms: int = 1000):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        topic: str = "robot.state",
+        timeout_ms: int = 1000,
+        robot_id: str | None = None,
+    ):
+        self._robot_id = robot_id
         self._context = zmq.Context.instance()
         self._socket = self._context.socket(zmq.SUB)
         self._socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
@@ -30,5 +38,9 @@ class StateSubscriber:
         self._socket.connect(f"tcp://{host}:{port}")
 
     def recv(self) -> tuple[str, dict[str, Any]]:
-        topic, payload = self._socket.recv_multipart()
-        return topic.decode("utf-8"), msgpack.unpackb(payload, raw=False)
+        while True:
+            topic, payload = self._socket.recv_multipart()
+            decoded_topic = topic.decode("utf-8")
+            decoded_payload = msgpack.unpackb(payload, raw=False)
+            if self._robot_id is None or decoded_payload.get("robot_id") == self._robot_id:
+                return decoded_topic, decoded_payload
