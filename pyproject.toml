@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zero-franky"
-version = "0.1.0"
+version = "0.1.1"
 description = "ZeroMQ client/server bridge for franky"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -13,9 +13,9 @@ authors = [
 ]
 
 dependencies = [
-    "pyzmq>=26.0.0",
+    "pyzmq>=25.0.0",
     "msgpack>=1.0.0",
-    "cloudpickle>=3.0.0"
+    "cloudpickle>=2.2.0"
 ]
 
 [project.scripts]
