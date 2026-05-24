@@ -30,6 +30,13 @@ class TrackerSessionProxy:
         self._kind = kind
         self._push = push_socket
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.stop()
+        return False
+
     @property
     def id(self) -> str:
         return self._id
