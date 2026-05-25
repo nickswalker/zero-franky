@@ -219,14 +219,21 @@ class RobotProxy:
         return self._client.call("robot.recover_from_errors", {"robot_id": self._id})
 
     def move(self, motion, asynchronous: bool = False):
-        return self._client.call(
-            "robot.move",
-            {
-                "robot_id": self._id,
-                "motion": encode_motion(motion),
-                "asynchronous": asynchronous,
-            },
-        )
+        params = {
+            "robot_id": self._id,
+            "motion": encode_motion(motion),
+            "asynchronous": asynchronous,
+        }
+        if asynchronous:
+            return self._client.call("robot.move", params)
+
+        # Secretly, this'll be async on the server end, so we don't
+        # leave the move call RPC open past the configured timeout
+        params["asynchronous"] = True
+        result = self._client.call("robot.move", params)
+        while not self.join_motion(timeout=0.1):
+            pass
+        return result
 
     def join_motion(self, timeout: float | None = None) -> bool:
         return bool(self._client.call("robot.join_motion", {"robot_id": self._id, "timeout": timeout}))
