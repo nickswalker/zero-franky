@@ -61,7 +61,6 @@ def _franky_nullspace_task(franky, payload: dict[str, Any]):
             payload["gain"],
             payload["damping"],
             payload["max_torque"],
-            payload["finite_difference_step"],
         )
     raise ValueError(f"Unsupported nullspace task type: {type_name}")
 
