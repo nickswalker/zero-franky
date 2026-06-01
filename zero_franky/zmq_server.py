@@ -68,11 +68,15 @@ class RobotManager:
         stop_on_policy_error: bool = True,
     ) -> str:
         from zero_franky.tracker_session import TrackerSession, load_policy
+        from zero_franky.zmq_server_franky import franky_motion_kwargs
 
         robot = self._robot(robot_id)
         reference_handle = self._franky.JointReferenceHandle()
         reference_handle.set(robot.current_joint_positions, robot.current_joint_velocities)
-        motion = self._franky.JointImpedanceTrackingMotion(reference_handle, **(motion_kwargs or {}))
+        motion = self._franky.JointImpedanceTrackingMotion(
+            reference_handle,
+            **franky_motion_kwargs(self._franky, motion_kwargs),
+        )
         self._register_state_callback(robot_id, motion)
         robot.move(motion, asynchronous=True)
         session = TrackerSession(
@@ -96,11 +100,15 @@ class RobotManager:
         stop_on_policy_error: bool = True,
     ) -> str:
         from zero_franky.tracker_session import TrackerSession, load_policy
+        from zero_franky.zmq_server_franky import franky_motion_kwargs
 
         robot = self._robot(robot_id)
         reference_handle = self._franky.CartesianReferenceHandle()
         reference_handle.set(robot.current_pose.end_effector_pose)
-        motion = self._franky.CartesianImpedanceTrackingMotion(reference_handle, **(motion_kwargs or {}))
+        motion = self._franky.CartesianImpedanceTrackingMotion(
+            reference_handle,
+            **franky_motion_kwargs(self._franky, motion_kwargs),
+        )
         self._register_state_callback(robot_id, motion)
         robot.move(motion, asynchronous=True)
         session = TrackerSession(

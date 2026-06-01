@@ -41,14 +41,45 @@ def _kwargs_without_none(payload: dict[str, Any], *keys: str):
     return {key: payload[key] for key in keys if payload.get(key) is not None}
 
 
+def _franky_nullspace_task(franky, payload: dict[str, Any]):
+    type_name = payload["type"]
+    if type_name == "PostureTask":
+        return franky.PostureTask(
+            payload["target"],
+            payload["stiffness"],
+            payload.get("damping"),
+            payload["max_torque"],
+        )
+    if type_name == "ManipulabilityTask":
+        return franky.ManipulabilityTask(
+            payload["gain"],
+            payload["damping"],
+            payload["max_torque"],
+            payload["finite_difference_step"],
+        )
+    raise ValueError(f"Unsupported nullspace task type: {type_name}")
+
+
+def _franky_nullspace_tasks(franky, payload: list[dict[str, Any]] | None):
+    if payload is None:
+        return None
+    return [_franky_nullspace_task(franky, item) for item in payload]
+
+
+def franky_motion_kwargs(franky, kwargs: dict[str, Any] | None) -> dict[str, Any]:
+    result = dict(kwargs or {})
+    if "nullspace_tasks" in result:
+        result["nullspace_tasks"] = _franky_nullspace_tasks(franky, result["nullspace_tasks"])
+    return result
+
+
 def _cartesian_impedance_kwargs(franky, payload: dict[str, Any]) -> dict[str, Any]:
     kwargs = {
         "target_type": _franky_reference_type(franky, payload["target_type"]),
         "translational_stiffness": payload["translational_stiffness"],
         "rotational_stiffness": payload["rotational_stiffness"],
         "force_constraints": payload["force_constraints"],
-        "nullspace_target": payload["nullspace_target"],
-        "nullspace_stiffness": payload["nullspace_stiffness"],
+        "nullspace_tasks": _franky_nullspace_tasks(franky, payload.get("nullspace_tasks")),
         "max_delta_tau": payload["max_delta_tau"],
         "lower_joint_limits": payload["lower_joint_limits"],
         "upper_joint_limits": payload["upper_joint_limits"],

@@ -79,6 +79,32 @@ def encode_vector(value: Any | None) -> list[float] | None:
     return [float(item) for item in value]
 
 
+def encode_nullspace_task(value: Any) -> dict[str, Any]:
+    name = type(value).__name__
+    if name == "PostureTask" or hasattr(value, "target"):
+        return {
+            "type": "PostureTask",
+            "target": encode_vector(value.target),
+            "stiffness": float(value.stiffness),
+            "damping": None if value.damping is None else float(value.damping),
+            "max_torque": float(value.max_torque),
+        }
+    if name == "ManipulabilityTask" or hasattr(value, "finite_difference_step"):
+        return {
+            "type": "ManipulabilityTask",
+            "gain": float(value.gain),
+            "damping": float(value.damping),
+            "max_torque": float(value.max_torque),
+        }
+    raise ProtocolError(f"Cannot encode {type(value).__name__} as a nullspace task")
+
+
+def encode_nullspace_tasks(value: Any | None) -> list[dict[str, Any]] | None:
+    if value is None:
+        return None
+    return [encode_nullspace_task(item) for item in value]
+
+
 def encode_rpc_value(value: Any) -> Any:
     if value is None or isinstance(value, (str, bytes, bool, int, float)):
         return value
@@ -92,6 +118,8 @@ def encode_rpc_value(value: Any) -> Any:
     item = getattr(value, "item", None)
     if callable(item):
         return encode_rpc_value(item())
+    if type(value).__name__ in {"PostureTask", "ManipulabilityTask"}:
+        return encode_nullspace_task(value)
     return value
 
 
@@ -189,23 +217,30 @@ def encode_joint_impedance_fields(motion: Any) -> dict[str, Any]:
 
 
 def encode_cartesian_impedance_fields(motion: Any) -> dict[str, Any]:
+    params = getattr(motion, "params", motion)
+
+    def field(name: str, default: Any = None) -> Any:
+        return getattr(motion, name, getattr(params, name, default))
+
+    nullspace_stiffness = field("nullspace_stiffness")
     return {
         "target": encode_affine(motion.target),
-        "target_type": encode_reference_type(motion.target_type),
-        "translational_stiffness": float(motion.translational_stiffness),
-        "rotational_stiffness": float(motion.rotational_stiffness),
-        "force_constraints": encode_optional_float_vector(motion.force_constraints),
-        "nullspace_target": encode_vector(motion.nullspace_target),
-        "nullspace_stiffness": float(motion.nullspace_stiffness),
-        "max_delta_tau": float(motion.max_delta_tau),
-        "lower_joint_limits": encode_vector(motion.lower_joint_limits),
-        "upper_joint_limits": encode_vector(motion.upper_joint_limits),
-        "joint_limit_activation_distance": float(motion.joint_limit_activation_distance),
-        "joint_limit_stiffness": float(motion.joint_limit_stiffness),
-        "joint_limit_damping": float(motion.joint_limit_damping),
-        "joint_limit_max_torque": float(motion.joint_limit_max_torque),
-        "translational_error_clip": encode_vector(motion.translational_error_clip),
-        "rotational_error_clip": encode_vector(motion.rotational_error_clip),
+        "target_type": encode_reference_type(field("target_type")),
+        "translational_stiffness": float(field("translational_stiffness")),
+        "rotational_stiffness": float(field("rotational_stiffness")),
+        "force_constraints": encode_optional_float_vector(field("force_constraints")),
+        "nullspace_target": encode_vector(field("nullspace_target")),
+        "nullspace_stiffness": None if nullspace_stiffness is None else float(nullspace_stiffness),
+        "nullspace_tasks": encode_nullspace_tasks(field("nullspace_tasks")),
+        "max_delta_tau": float(field("max_delta_tau")),
+        "lower_joint_limits": encode_vector(field("lower_joint_limits")),
+        "upper_joint_limits": encode_vector(field("upper_joint_limits")),
+        "joint_limit_activation_distance": float(field("joint_limit_activation_distance")),
+        "joint_limit_stiffness": float(field("joint_limit_stiffness")),
+        "joint_limit_damping": float(field("joint_limit_damping")),
+        "joint_limit_max_torque": float(field("joint_limit_max_torque")),
+        "translational_error_clip": encode_vector(field("translational_error_clip")),
+        "rotational_error_clip": encode_vector(field("rotational_error_clip")),
     }
 
 
