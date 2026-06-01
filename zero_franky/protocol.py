@@ -57,6 +57,22 @@ def encode_reference_type(value: Any) -> str:
     raise ProtocolError(f"Cannot encode {value!r} as ReferenceType")
 
 
+def encode_cartesian_impedance_dynamics_mode(value: Any | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value in {"Wrench", "OperationalSpace"}:
+        return value
+    name = getattr(value, "name", None)
+    if name in {"Wrench", "OperationalSpace"}:
+        return name
+    text = str(value)
+    if text.endswith(".Wrench"):
+        return "Wrench"
+    if text.endswith(".OperationalSpace"):
+        return "OperationalSpace"
+    raise ProtocolError(f"Cannot encode {value!r} as CartesianImpedanceDynamicsMode")
+
+
 def encode_relative_dynamics_factor(value: Any) -> dict[str, Any]:
     if isinstance(value, (int, float)):
         return {"velocity": float(value), "acceleration": float(value), "jerk": float(value)}
@@ -120,6 +136,8 @@ def encode_rpc_value(value: Any) -> Any:
         return encode_rpc_value(item())
     if type(value).__name__ in {"PostureTask", "ManipulabilityTask"}:
         return encode_nullspace_task(value)
+    if type(value).__name__ == "CartesianImpedanceDynamicsMode":
+        return encode_cartesian_impedance_dynamics_mode(value)
     return value
 
 
@@ -229,6 +247,7 @@ def encode_cartesian_impedance_fields(motion: Any) -> dict[str, Any]:
         "translational_stiffness": float(field("translational_stiffness")),
         "rotational_stiffness": float(field("rotational_stiffness")),
         "force_constraints": encode_optional_float_vector(field("force_constraints")),
+        "dynamics_mode": encode_cartesian_impedance_dynamics_mode(field("dynamics_mode")),
         "nullspace_target": encode_vector(field("nullspace_target")),
         "nullspace_stiffness": None if nullspace_stiffness is None else float(nullspace_stiffness),
         "nullspace_tasks": encode_nullspace_tasks(field("nullspace_tasks")),

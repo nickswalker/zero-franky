@@ -18,6 +18,12 @@ def _franky_reference_type(franky, value: str):
     return getattr(franky.ReferenceType, value)
 
 
+def _franky_cartesian_impedance_dynamics_mode(franky, value: str | None):
+    if value is None:
+        return None
+    return getattr(franky.CartesianImpedanceDynamicsMode, value)
+
+
 def _franky_relative_dynamics_factor(franky, payload: dict[str, Any]):
     velocity = payload["velocity"]
     acceleration = payload["acceleration"]
@@ -70,6 +76,8 @@ def franky_motion_kwargs(franky, kwargs: dict[str, Any] | None) -> dict[str, Any
     result = dict(kwargs or {})
     if "nullspace_tasks" in result:
         result["nullspace_tasks"] = _franky_nullspace_tasks(franky, result["nullspace_tasks"])
+    if "dynamics_mode" in result:
+        result["dynamics_mode"] = _franky_cartesian_impedance_dynamics_mode(franky, result["dynamics_mode"])
     return result
 
 
@@ -79,6 +87,7 @@ def _cartesian_impedance_kwargs(franky, payload: dict[str, Any]) -> dict[str, An
         "translational_stiffness": payload["translational_stiffness"],
         "rotational_stiffness": payload["rotational_stiffness"],
         "force_constraints": payload["force_constraints"],
+        "dynamics_mode": _franky_cartesian_impedance_dynamics_mode(franky, payload.get("dynamics_mode")),
         "nullspace_tasks": _franky_nullspace_tasks(franky, payload.get("nullspace_tasks")),
         "max_delta_tau": payload["max_delta_tau"],
         "lower_joint_limits": payload["lower_joint_limits"],
