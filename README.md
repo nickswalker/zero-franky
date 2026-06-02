@@ -38,8 +38,6 @@ flowchart LR
 
 ## Usage
 
-`zero-franky` keeps the client-side construction style familiar:
-
 ```python
 from zero_franky import setup_zero_franky
 from zero_franky import Robot
@@ -100,7 +98,7 @@ ZmqRobotServer(
 - `tracker.set_joint_reference`
 - `tracker.set_cartesian_reference`
 
-Supported motion payloads cover position, velocity, waypoint, stop, and fixed impedance motions. Tracker motions are exposed through tracker sessions rather than serialized as ordinary motion objects.
+Supported motion payloads cover position, velocity, waypoint, stop, and fixed impedance motions.
 
 ## Telemetry
 

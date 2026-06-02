@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.2] - Unreleased
+
+### Added
+
+- Wrap cartesian impedance damping parameters
+
+### Fixed
+
+- Remove a broken nullspace task parameter
+
 ## [0.1.1] - 2026-06-01
 
 ### Added

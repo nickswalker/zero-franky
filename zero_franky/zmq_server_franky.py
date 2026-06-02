@@ -85,6 +85,8 @@ def _cartesian_impedance_kwargs(franky, payload: dict[str, Any]) -> dict[str, An
         "target_type": _franky_reference_type(franky, payload["target_type"]),
         "translational_stiffness": payload["translational_stiffness"],
         "rotational_stiffness": payload["rotational_stiffness"],
+        "translational_damping": payload.get("translational_damping"),
+        "rotational_damping": payload.get("rotational_damping"),
         "force_constraints": payload["force_constraints"],
         "dynamics_mode": _franky_cartesian_impedance_dynamics_mode(franky, payload.get("dynamics_mode")),
         "nullspace_tasks": _franky_nullspace_tasks(franky, payload.get("nullspace_tasks")),

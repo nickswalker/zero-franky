@@ -246,6 +246,8 @@ def encode_cartesian_impedance_fields(motion: Any) -> dict[str, Any]:
         "target_type": encode_reference_type(field("target_type")),
         "translational_stiffness": float(field("translational_stiffness")),
         "rotational_stiffness": float(field("rotational_stiffness")),
+        "translational_damping": None if (v := field("translational_damping")) is None else float(v),
+        "rotational_damping": None if (v := field("rotational_damping")) is None else float(v),
         "force_constraints": encode_optional_float_vector(field("force_constraints")),
         "dynamics_mode": encode_cartesian_impedance_dynamics_mode(field("dynamics_mode")),
         "nullspace_target": encode_vector(field("nullspace_target")),
