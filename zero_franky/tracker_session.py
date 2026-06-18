@@ -105,8 +105,10 @@ class TrackerSession:
     ):
         self._reference_handle.set(position, velocity, torque_feedforward)
 
-    def set_cartesian_reference(self, target: Any, target_twist: Any | None = None):
-        self._reference_handle.set(target, target_twist)
+    def set_cartesian_reference(
+        self, target: Any, target_twist: Any | None = None, target_acceleration: Any | None = None
+    ):
+        self._reference_handle.set(target, target_twist, target_acceleration)
 
     def _run_policy(self):
         if self._policy_factory is None:
@@ -167,7 +169,11 @@ class TrackerSession:
             )
             return
         if self.kind == "cartesian":
-            self._reference_handle.set(reference["target"], reference.get("target_twist"))
+            self._reference_handle.set(
+                reference["target"],
+                reference.get("target_twist"),
+                reference.get("target_acceleration"),
+            )
             return
         raise TrackerPolicyError(f"Unsupported tracker kind: {self.kind}")
 

@@ -7,7 +7,14 @@ import threading
 import msgpack
 import zmq
 
-from zero_franky.protocol import RpcRequest, encode_affine, encode_motion, encode_robot_velocity, encode_rpc_value
+from zero_franky.protocol import (
+    RpcRequest,
+    encode_affine,
+    encode_motion,
+    encode_robot_velocity,
+    encode_rpc_value,
+    encode_twist_acceleration,
+)
 
 
 def encode_policy(policy, transport: str = "import") -> dict[str, Any]:
@@ -84,9 +91,11 @@ class TrackerSessionProxy:
             },
         )
 
-    def set_cartesian_reference(self, target, target_twist=None):
+    def set_cartesian_reference(self, target, target_twist=None, target_acceleration=None):
         if self._kind != "cartesian":
             raise RuntimeError("set_cartesian_reference is only valid for Cartesian tracker sessions")
+        twist = encode_robot_velocity(target_twist) if target_twist is not None else None
+        accel = encode_twist_acceleration(target_acceleration) if target_acceleration is not None else None
         if self._push is not None:
             self._push.send(
                 msgpack.packb(
@@ -94,7 +103,8 @@ class TrackerSessionProxy:
                         "session_id": self._id,
                         "kind": "cartesian",
                         "target": encode_affine(target),
-                        "target_twist": encode_robot_velocity(target_twist) if target_twist is not None else None,
+                        "target_twist": twist,
+                        "target_acceleration": accel,
                     },
                     use_bin_type=True,
                 )
@@ -105,7 +115,8 @@ class TrackerSessionProxy:
             {
                 "session_id": self._id,
                 "target": encode_affine(target),
-                "target_twist": encode_robot_velocity(target_twist) if target_twist is not None else None,
+                "target_twist": twist,
+                "target_acceleration": accel,
             },
         )
 

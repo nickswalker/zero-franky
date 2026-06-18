@@ -95,6 +95,17 @@ def encode_vector(value: Any | None) -> list[float] | None:
     return [float(item) for item in value]
 
 
+def encode_friction_compensation_params(value: Any | None) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    return {
+        "coulomb": encode_vector(value.coulomb),
+        "viscous": encode_vector(value.viscous),
+        "max_torque": encode_vector(value.max_torque),
+        "velocity_epsilon": float(value.velocity_epsilon),
+    }
+
+
 def encode_nullspace_task(value: Any) -> dict[str, Any]:
     name = type(value).__name__
     if name == "PostureTask" or hasattr(value, "target"):
@@ -138,6 +149,8 @@ def encode_rpc_value(value: Any) -> Any:
         return encode_nullspace_task(value)
     if type(value).__name__ == "CartesianImpedanceDynamicsMode":
         return encode_cartesian_impedance_dynamics_mode(value)
+    if type(value).__name__ == "FrictionCompensationParams":
+        return encode_friction_compensation_params(value)
     return value
 
 
@@ -169,6 +182,13 @@ def encode_cartesian_target(value: Any) -> dict[str, Any]:
 def encode_twist(value: Any) -> dict[str, Any]:
     return {
         "type": "Twist",
+        "linear": [float(item) for item in value.linear],
+        "angular": [float(item) for item in value.angular],
+    }
+
+
+def encode_twist_acceleration(value: Any) -> dict[str, Any]:
+    return {
         "linear": [float(item) for item in value.linear],
         "angular": [float(item) for item in value.angular],
     }
@@ -227,10 +247,7 @@ def encode_joint_impedance_fields(motion: Any) -> dict[str, Any]:
         "joint_limit_stiffness": float(motion.joint_limit_stiffness),
         "joint_limit_damping": float(motion.joint_limit_damping),
         "joint_limit_max_torque": float(motion.joint_limit_max_torque),
-        "friction_coulomb": encode_vector(getattr(motion, "friction_coulomb", None)),
-        "friction_viscous": encode_vector(getattr(motion, "friction_viscous", None)),
-        "friction_max_torque": encode_vector(getattr(motion, "friction_max_torque", None)),
-        "friction_velocity_epsilon": float(getattr(motion, "friction_velocity_epsilon", 0.03)),
+        "friction": encode_friction_compensation_params(getattr(motion, "friction", None)),
     }
 
 
@@ -262,6 +279,7 @@ def encode_cartesian_impedance_fields(motion: Any) -> dict[str, Any]:
         "joint_limit_max_torque": float(field("joint_limit_max_torque")),
         "translational_error_clip": encode_vector(field("translational_error_clip")),
         "rotational_error_clip": encode_vector(field("rotational_error_clip")),
+        "friction": encode_friction_compensation_params(field("friction")),
     }
 
 

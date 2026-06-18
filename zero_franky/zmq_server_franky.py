@@ -71,12 +71,25 @@ def _franky_nullspace_tasks(franky, payload: list[dict[str, Any]] | None):
     return [_franky_nullspace_task(franky, item) for item in payload]
 
 
+def _franky_friction_compensation_params(franky, payload: dict[str, Any] | None):
+    if payload is None:
+        return None
+    return franky.FrictionCompensationParams(
+        payload["coulomb"],
+        payload["viscous"],
+        payload["max_torque"],
+        payload["velocity_epsilon"],
+    )
+
+
 def franky_motion_kwargs(franky, kwargs: dict[str, Any] | None) -> dict[str, Any]:
     result = dict(kwargs or {})
     if "nullspace_tasks" in result:
         result["nullspace_tasks"] = _franky_nullspace_tasks(franky, result["nullspace_tasks"])
     if "dynamics_mode" in result:
         result["dynamics_mode"] = _franky_cartesian_impedance_dynamics_mode(franky, result["dynamics_mode"])
+    if "friction" in result and isinstance(result["friction"], dict):
+        result["friction"] = _franky_friction_compensation_params(franky, result["friction"])
     return result
 
 
@@ -99,6 +112,7 @@ def _cartesian_impedance_kwargs(franky, payload: dict[str, Any]) -> dict[str, An
         "joint_limit_max_torque": payload["joint_limit_max_torque"],
         "translational_error_clip": payload["translational_error_clip"],
         "rotational_error_clip": payload["rotational_error_clip"],
+        "friction": _franky_friction_compensation_params(franky, payload.get("friction")),
     }
     return {key: value for key, value in kwargs.items() if value is not None}
 
@@ -116,6 +130,12 @@ def _franky_cartesian_target(franky, payload: dict[str, Any]):
 
 def _franky_twist(franky, payload: dict[str, Any]):
     return franky.Twist(payload["linear"], payload["angular"])
+
+
+def _franky_twist_acceleration(franky, payload: dict[str, Any] | None):
+    if payload is None:
+        return None
+    return franky.TwistAcceleration(payload["linear"], payload["angular"])
 
 
 def _franky_robot_velocity(franky, payload: dict[str, Any]):
@@ -287,9 +307,6 @@ def build_joint_impedance_motion(franky, payload: dict[str, Any]):
         "constant_torque_offset",
         "lower_joint_limits",
         "upper_joint_limits",
-        "friction_coulomb",
-        "friction_viscous",
-        "friction_max_torque",
     )
     kwargs.update(
         {
@@ -299,9 +316,11 @@ def build_joint_impedance_motion(franky, payload: dict[str, Any]):
             "joint_limit_stiffness": payload["joint_limit_stiffness"],
             "joint_limit_damping": payload["joint_limit_damping"],
             "joint_limit_max_torque": payload["joint_limit_max_torque"],
-            "friction_velocity_epsilon": payload.get("friction_velocity_epsilon", 0.03),
         }
     )
+    friction = _franky_friction_compensation_params(franky, payload.get("friction"))
+    if friction is not None:
+        kwargs["friction"] = friction
     return franky.JointImpedanceMotion(payload["target"], **kwargs)
 
 

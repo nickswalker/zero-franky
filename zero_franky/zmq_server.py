@@ -146,12 +146,18 @@ class RobotManager:
         session_id: str,
         target_payload: dict[str, Any],
         target_twist_payload: dict[str, Any] | None = None,
+        target_acceleration_payload: dict[str, Any] | None = None,
     ):
-        from zero_franky.zmq_server_franky import _franky_affine, _franky_robot_velocity
+        from zero_franky.zmq_server_franky import (
+            _franky_affine,
+            _franky_robot_velocity,
+            _franky_twist_acceleration,
+        )
 
         target = _franky_affine(self._franky, target_payload)
         target_twist = _franky_robot_velocity(self._franky, target_twist_payload) if target_twist_payload else None
-        self._tracker_session(session_id).set_cartesian_reference(target, target_twist)
+        target_acceleration = _franky_twist_acceleration(self._franky, target_acceleration_payload)
+        self._tracker_session(session_id).set_cartesian_reference(target, target_twist, target_acceleration)
         return True
 
     def _tracker_session(self, session_id: str):
@@ -228,6 +234,7 @@ class _TrackerUpdateListener:
                         session_id,
                         msg["target"],
                         msg.get("target_twist"),
+                        msg.get("target_acceleration"),
                     )
             except Exception:
                 pass
@@ -355,4 +362,5 @@ def handle_tracker_set_cartesian_reference(manager: RobotManager, params: dict[s
         params["session_id"],
         params["target"],
         params.get("target_twist"),
+        params.get("target_acceleration"),
     )
