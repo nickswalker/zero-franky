@@ -154,6 +154,18 @@ def encode_rpc_value(value: Any) -> Any:
     return value
 
 
+def encode_cartesian_gain(value: Any | None) -> Any:
+    if value is None:
+        return None
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        value = tolist()
+    rows = [list(row) if isinstance(row, (list, tuple)) else row for row in value]
+    if len(rows) == 6 and all(isinstance(row, (list, tuple)) for row in rows):
+        return [[float(item) for item in row] for row in rows]
+    return [float(item) for item in value]
+
+
 def encode_optional_float_vector(value: Any | None) -> list[float | None] | None:
     if value is None:
         return None
@@ -233,36 +245,56 @@ def encode_velocity_waypoint(waypoint: Any, target_encoder) -> dict[str, Any]:
 
 
 def encode_joint_impedance_fields(motion: Any) -> dict[str, Any]:
+    params = getattr(motion, "params", motion)
+    safety = getattr(params, "safety", params)
+    cartesian_gains = getattr(params, "cartesian_gains", None)
+
+    def field(name: str, default: Any = None) -> Any:
+        return getattr(motion, name, getattr(params, name, default))
+
+    def safety_field(name: str, default: Any = None) -> Any:
+        return getattr(motion, name, getattr(safety, name, default))
+
     return {
         "target": encode_vector(motion.target),
         "target_velocity": encode_vector(motion.target_velocity),
-        "stiffness": encode_vector(motion.stiffness),
-        "damping": encode_vector(motion.damping),
-        "constant_torque_offset": encode_vector(motion.constant_torque_offset),
-        "lower_joint_limits": encode_vector(motion.lower_joint_limits),
-        "upper_joint_limits": encode_vector(motion.upper_joint_limits),
-        "compensate_coriolis": bool(motion.compensate_coriolis),
-        "max_delta_tau": float(motion.max_delta_tau),
-        "joint_limit_activation_distance": float(motion.joint_limit_activation_distance),
-        "joint_limit_stiffness": float(motion.joint_limit_stiffness),
-        "joint_limit_damping": float(motion.joint_limit_damping),
-        "joint_limit_max_torque": float(motion.joint_limit_max_torque),
-        "friction": encode_friction_compensation_params(getattr(motion, "friction", None)),
+        "stiffness": encode_vector(field("stiffness")),
+        "damping": encode_vector(field("damping")),
+        "constant_torque_offset": encode_vector(field("constant_torque_offset")),
+        "lower_joint_limits": encode_vector(safety_field("lower_joint_limits")),
+        "upper_joint_limits": encode_vector(safety_field("upper_joint_limits")),
+        "compensate_coriolis": bool(field("compensate_coriolis")),
+        "max_delta_tau": float(safety_field("max_delta_tau")),
+        "joint_limit_activation_distance": float(safety_field("joint_limit_activation_distance")),
+        "joint_limit_stiffness": float(safety_field("joint_limit_stiffness")),
+        "joint_limit_damping": float(safety_field("joint_limit_damping")),
+        "joint_limit_max_torque": float(safety_field("joint_limit_max_torque")),
+        "friction": encode_friction_compensation_params(field("friction")),
+        "cartesian_stiffness": encode_vector(getattr(cartesian_gains, "stiffness", None)),
+        "cartesian_damping": encode_vector(getattr(cartesian_gains, "damping", None)),
     }
 
 
 def encode_cartesian_impedance_fields(motion: Any) -> dict[str, Any]:
     params = getattr(motion, "params", motion)
+    safety = getattr(params, "safety", params)
 
     def field(name: str, default: Any = None) -> Any:
         return getattr(motion, name, getattr(params, name, default))
+
+    def safety_field(name: str, default: Any = None) -> Any:
+        return getattr(motion, name, getattr(safety, name, default))
 
     nullspace_stiffness = field("nullspace_stiffness")
     return {
         "target": encode_affine(motion.target),
         "target_type": encode_reference_type(field("target_type")),
-        "translational_stiffness": float(field("translational_stiffness")),
-        "rotational_stiffness": float(field("rotational_stiffness")),
+        "stiffness": encode_cartesian_gain(field("stiffness")),
+        "damping": encode_cartesian_gain(field("damping")),
+        "translational_stiffness": (
+            None if (v := field("translational_stiffness")) is None else float(v)
+        ),
+        "rotational_stiffness": None if (v := field("rotational_stiffness")) is None else float(v),
         "translational_damping": None if (v := field("translational_damping")) is None else float(v),
         "rotational_damping": None if (v := field("rotational_damping")) is None else float(v),
         "force_constraints": encode_optional_float_vector(field("force_constraints")),
@@ -270,13 +302,13 @@ def encode_cartesian_impedance_fields(motion: Any) -> dict[str, Any]:
         "nullspace_target": encode_vector(field("nullspace_target")),
         "nullspace_stiffness": None if nullspace_stiffness is None else float(nullspace_stiffness),
         "nullspace_tasks": encode_nullspace_tasks(field("nullspace_tasks")),
-        "max_delta_tau": float(field("max_delta_tau")),
-        "lower_joint_limits": encode_vector(field("lower_joint_limits")),
-        "upper_joint_limits": encode_vector(field("upper_joint_limits")),
-        "joint_limit_activation_distance": float(field("joint_limit_activation_distance")),
-        "joint_limit_stiffness": float(field("joint_limit_stiffness")),
-        "joint_limit_damping": float(field("joint_limit_damping")),
-        "joint_limit_max_torque": float(field("joint_limit_max_torque")),
+        "max_delta_tau": float(safety_field("max_delta_tau")),
+        "lower_joint_limits": encode_vector(safety_field("lower_joint_limits")),
+        "upper_joint_limits": encode_vector(safety_field("upper_joint_limits")),
+        "joint_limit_activation_distance": float(safety_field("joint_limit_activation_distance")),
+        "joint_limit_stiffness": float(safety_field("joint_limit_stiffness")),
+        "joint_limit_damping": float(safety_field("joint_limit_damping")),
+        "joint_limit_max_torque": float(safety_field("joint_limit_max_torque")),
         "translational_error_clip": encode_vector(field("translational_error_clip")),
         "rotational_error_clip": encode_vector(field("rotational_error_clip")),
         "friction": encode_friction_compensation_params(field("friction")),

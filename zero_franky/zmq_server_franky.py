@@ -96,8 +96,10 @@ def franky_motion_kwargs(franky, kwargs: dict[str, Any] | None) -> dict[str, Any
 def _cartesian_impedance_kwargs(franky, payload: dict[str, Any]) -> dict[str, Any]:
     kwargs = {
         "target_type": _franky_reference_type(franky, payload["target_type"]),
-        "translational_stiffness": payload["translational_stiffness"],
-        "rotational_stiffness": payload["rotational_stiffness"],
+        "stiffness": payload.get("stiffness"),
+        "damping": payload.get("damping"),
+        "translational_stiffness": payload.get("translational_stiffness"),
+        "rotational_stiffness": payload.get("rotational_stiffness"),
         "translational_damping": payload.get("translational_damping"),
         "rotational_damping": payload.get("rotational_damping"),
         "force_constraints": payload["force_constraints"],
@@ -307,6 +309,8 @@ def build_joint_impedance_motion(franky, payload: dict[str, Any]):
         "constant_torque_offset",
         "lower_joint_limits",
         "upper_joint_limits",
+        "cartesian_stiffness",
+        "cartesian_damping",
     )
     kwargs.update(
         {
