@@ -297,6 +297,7 @@ def build_joint_impedance_motion(franky, payload: dict[str, Any]):
         "target_velocity",
         "stiffness",
         "damping",
+        "error_clip",
         "constant_torque_offset",
         "lower_joint_limits",
         "upper_joint_limits",

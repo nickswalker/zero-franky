@@ -97,6 +97,10 @@ ZmqRobotServer(
 - `tracker.stop`
 - `tracker.set_joint_reference`
 - `tracker.set_cartesian_reference`
+- `tracker.set_joint_gains`
+- `tracker.set_joint_cartesian_gains`
+- `tracker.set_cartesian_gains`
+- `tracker.set_nullspace_gains`
 
 Supported motion payloads cover position, velocity, waypoint, stop, and fixed impedance motions.
 
@@ -117,6 +121,7 @@ Tracker sessions are for `JointImpedanceTrackingMotion` and `CartesianImpedanceT
 ```python
 with robot.start_joint_impedance_session(stiffness=[10.0] * 7, damping=[6.0] * 7) as session:
     session.set_joint_reference(q, velocity=dq)
+    session.set_joint_gains(stiffness=[20.0] * 7, damping=[8.0] * 7)
 ```
 
 The proxy stops the tracker when the context block exits.
@@ -187,8 +192,8 @@ with robot.start_cartesian_impedance_session(
     translational_stiffness=250.0,
     rotational_stiffness=25.0,
 ) as session:
+    session.set_cartesian_gains(translational_stiffness=300.0, rotational_stiffness=30.0)
     status = session.status()
 ```
 
 The policy function receives a context with `franky`, `robot`, `elapsed`, `iterations`, and `stop()`. A factory may return a step function, or the policy may act directly as the step function. Joint steps return `{"position": q, "velocity": dq, "torque_feedforward": tau}`. Cartesian steps return `{"target": affine, "target_twist": twist}`.
-

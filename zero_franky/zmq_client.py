@@ -120,6 +120,66 @@ class TrackerSessionProxy:
             },
         )
 
+    def set_joint_gains(self, stiffness: list[float], damping: list[float]):
+        if self._kind != "joint":
+            raise RuntimeError("set_joint_gains is only valid for joint tracker sessions")
+        return self._client.call(
+            "tracker.set_joint_gains",
+            {"session_id": self._id, "stiffness": stiffness, "damping": damping},
+        )
+
+    def set_joint_cartesian_gains(self, stiffness: list[float], damping: list[float] | None = None):
+        if self._kind != "joint":
+            raise RuntimeError("set_joint_cartesian_gains is only valid for joint tracker sessions")
+        return self._client.call(
+            "tracker.set_joint_cartesian_gains",
+            {"session_id": self._id, "stiffness": stiffness, "damping": damping},
+        )
+
+    def set_cartesian_gains(
+        self,
+        *,
+        stiffness=None,
+        damping=None,
+        translational_stiffness: float | None = None,
+        rotational_stiffness: float | None = None,
+        translational_damping: float | None = None,
+        rotational_damping: float | None = None,
+    ):
+        if self._kind != "cartesian":
+            raise RuntimeError("set_cartesian_gains is only valid for Cartesian tracker sessions")
+        gains = {
+            "stiffness": encode_rpc_value(stiffness),
+            "damping": encode_rpc_value(damping),
+            "translational_stiffness": translational_stiffness,
+            "rotational_stiffness": rotational_stiffness,
+            "translational_damping": translational_damping,
+            "rotational_damping": rotational_damping,
+        }
+        return self._client.call("tracker.set_cartesian_gains", {"session_id": self._id, "gains": gains})
+
+    def set_nullspace_gains(
+        self,
+        *,
+        posture_stiffness: float = 0.0,
+        posture_damping: float | None = None,
+        posture_max_torque: float = 0.0,
+        manipulability_gain: float = 0.0,
+        manipulability_damping: float = 0.0,
+        manipulability_max_torque: float = 0.0,
+    ):
+        if self._kind != "cartesian":
+            raise RuntimeError("set_nullspace_gains is only valid for Cartesian tracker sessions")
+        gains = {
+            "posture_stiffness": posture_stiffness,
+            "posture_damping": posture_damping,
+            "posture_max_torque": posture_max_torque,
+            "manipulability_gain": manipulability_gain,
+            "manipulability_damping": manipulability_damping,
+            "manipulability_max_torque": manipulability_max_torque,
+        }
+        return self._client.call("tracker.set_nullspace_gains", {"session_id": self._id, "gains": gains})
+
 
 class ZmqRpcClient:
     def __init__(self, host: str, port: int, timeout_ms: int = 5000):

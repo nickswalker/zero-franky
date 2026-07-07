@@ -73,9 +73,16 @@ class RobotManager:
         robot = self._robot(robot_id)
         reference_handle = self._franky.JointReferenceHandle()
         reference_handle.set(robot.current_joint_positions, robot.current_joint_velocities)
+        gains_handle = self._franky.JointImpedanceGainsHandle()
+        cartesian_gains_handle = None
+        motion_options = franky_motion_kwargs(self._franky, motion_kwargs)
+        if motion_options.get("cartesian_stiffness") is not None:
+            cartesian_gains_handle = self._franky.HybridCartesianGainsHandle()
         motion = self._franky.JointImpedanceTrackingMotion(
             reference_handle,
-            **franky_motion_kwargs(self._franky, motion_kwargs),
+            **motion_options,
+            gains_handle=gains_handle,
+            cartesian_gains_handle=cartesian_gains_handle,
         )
         self._register_state_callback(robot_id, motion)
         robot.move(motion, asynchronous=True)
@@ -85,6 +92,8 @@ class RobotManager:
             kind="joint",
             policy_factory=load_policy(policy_payload) if policy_payload is not None else None,
             reference_handle=reference_handle,
+            gains_handle=gains_handle,
+            cartesian_gains_handle=cartesian_gains_handle,
             period=period,
             stop_on_policy_error=stop_on_policy_error,
         )
@@ -105,9 +114,17 @@ class RobotManager:
         robot = self._robot(robot_id)
         reference_handle = self._franky.CartesianReferenceHandle()
         reference_handle.set(robot.current_pose.end_effector_pose)
+        gains_handle = self._franky.CartesianImpedanceGainsHandle()
+        motion_options = franky_motion_kwargs(self._franky, motion_kwargs)
+        nullspace_tasks = motion_options.get("nullspace_tasks")
+        nullspace_gains_handle = None
+        if nullspace_tasks:
+            nullspace_gains_handle = self._franky.NullspaceGainsHandle(nullspace_tasks)
         motion = self._franky.CartesianImpedanceTrackingMotion(
             reference_handle,
-            **franky_motion_kwargs(self._franky, motion_kwargs),
+            **motion_options,
+            gains_handle=gains_handle,
+            nullspace_gains_handle=nullspace_gains_handle,
         )
         self._register_state_callback(robot_id, motion)
         robot.move(motion, asynchronous=True)
@@ -117,6 +134,8 @@ class RobotManager:
             kind="cartesian",
             policy_factory=load_policy(policy_payload) if policy_payload is not None else None,
             reference_handle=reference_handle,
+            gains_handle=gains_handle,
+            nullspace_gains_handle=nullspace_gains_handle,
             period=period,
             stop_on_policy_error=stop_on_policy_error,
         )
@@ -158,6 +177,29 @@ class RobotManager:
         target_twist = _franky_robot_velocity(self._franky, target_twist_payload) if target_twist_payload else None
         target_acceleration = _franky_twist_acceleration(self._franky, target_acceleration_payload)
         self._tracker_session(session_id).set_cartesian_reference(target, target_twist, target_acceleration)
+        return True
+
+    def set_joint_tracker_gains(self, session_id: str, stiffness: list[float], damping: list[float]):
+        self._tracker_session(session_id).set_joint_gains(stiffness, damping)
+        return True
+
+    def set_joint_tracker_cartesian_gains(
+        self,
+        session_id: str,
+        stiffness: list[float],
+        damping: list[float] | None = None,
+    ):
+        self._tracker_session(session_id).set_hybrid_cartesian_gains(stiffness, damping)
+        return True
+
+    def set_cartesian_tracker_gains(self, session_id: str, gains_payload: dict[str, Any]):
+        gains = self._franky.CartesianImpedanceGains(**gains_payload)
+        self._tracker_session(session_id).set_cartesian_gains(gains)
+        return True
+
+    def set_cartesian_tracker_nullspace_gains(self, session_id: str, gains_payload: dict[str, Any]):
+        gains = self._franky.NullspaceGains(**gains_payload)
+        self._tracker_session(session_id).set_nullspace_gains(gains)
         return True
 
     def _tracker_session(self, session_id: str):
@@ -364,3 +406,27 @@ def handle_tracker_set_cartesian_reference(manager: RobotManager, params: dict[s
         params.get("target_twist"),
         params.get("target_acceleration"),
     )
+
+
+@rpc_handler("tracker.set_joint_gains")
+def handle_tracker_set_joint_gains(manager: RobotManager, params: dict[str, Any]):
+    return manager.set_joint_tracker_gains(params["session_id"], params["stiffness"], params["damping"])
+
+
+@rpc_handler("tracker.set_joint_cartesian_gains")
+def handle_tracker_set_joint_cartesian_gains(manager: RobotManager, params: dict[str, Any]):
+    return manager.set_joint_tracker_cartesian_gains(
+        params["session_id"],
+        params["stiffness"],
+        params.get("damping"),
+    )
+
+
+@rpc_handler("tracker.set_cartesian_gains")
+def handle_tracker_set_cartesian_gains(manager: RobotManager, params: dict[str, Any]):
+    return manager.set_cartesian_tracker_gains(params["session_id"], params["gains"])
+
+
+@rpc_handler("tracker.set_nullspace_gains")
+def handle_tracker_set_nullspace_gains(manager: RobotManager, params: dict[str, Any]):
+    return manager.set_cartesian_tracker_nullspace_gains(params["session_id"], params["gains"])

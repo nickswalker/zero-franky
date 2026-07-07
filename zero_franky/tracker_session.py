@@ -57,8 +57,11 @@ class TrackerSession:
         kind: str,
         policy_factory: Callable[[Any], Any] | None,
         reference_handle: Any,
-        period: float,
-        stop_on_policy_error: bool,
+        gains_handle: Any | None = None,
+        cartesian_gains_handle: Any | None = None,
+        nullspace_gains_handle: Any | None = None,
+        period: float = 0.001,
+        stop_on_policy_error: bool = True,
     ):
         self.id = uuid.uuid4().hex
         self.kind = kind
@@ -66,6 +69,9 @@ class TrackerSession:
         self._robot = robot
         self._policy_factory = policy_factory
         self._reference_handle = reference_handle
+        self._gains_handle = gains_handle
+        self._cartesian_gains_handle = cartesian_gains_handle
+        self._nullspace_gains_handle = nullspace_gains_handle
         self._period = period
         self._stop_on_policy_error = stop_on_policy_error
         self._stop_event = threading.Event()
@@ -109,6 +115,26 @@ class TrackerSession:
         self, target: Any, target_twist: Any | None = None, target_acceleration: Any | None = None
     ):
         self._reference_handle.set(target, target_twist, target_acceleration)
+
+    def set_joint_gains(self, stiffness: list[float], damping: list[float]):
+        if self._gains_handle is None:
+            raise TrackerPolicyError("This session has no joint gains handle")
+        self._gains_handle.set(stiffness, damping)
+
+    def set_cartesian_gains(self, gains: Any):
+        if self._gains_handle is None:
+            raise TrackerPolicyError("This session has no Cartesian gains handle")
+        self._gains_handle.set(gains)
+
+    def set_hybrid_cartesian_gains(self, stiffness: list[float], damping: list[float] | None = None):
+        if self._cartesian_gains_handle is None:
+            raise TrackerPolicyError("This session has no hybrid Cartesian gains handle")
+        self._cartesian_gains_handle.set(stiffness, damping)
+
+    def set_nullspace_gains(self, gains: Any):
+        if self._nullspace_gains_handle is None:
+            raise TrackerPolicyError("This session has no nullspace gains handle")
+        self._nullspace_gains_handle.set(gains)
 
     def _run_policy(self):
         if self._policy_factory is None:
