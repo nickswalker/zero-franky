@@ -57,22 +57,6 @@ def encode_reference_type(value: Any) -> str:
     raise ProtocolError(f"Cannot encode {value!r} as ReferenceType")
 
 
-def encode_cartesian_impedance_dynamics_mode(value: Any | None) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, str) and value in {"Wrench", "OperationalSpace"}:
-        return value
-    name = getattr(value, "name", None)
-    if name in {"Wrench", "OperationalSpace"}:
-        return name
-    text = str(value)
-    if text.endswith(".Wrench"):
-        return "Wrench"
-    if text.endswith(".OperationalSpace"):
-        return "OperationalSpace"
-    raise ProtocolError(f"Cannot encode {value!r} as CartesianImpedanceDynamicsMode")
-
-
 def encode_relative_dynamics_factor(value: Any) -> dict[str, Any]:
     if isinstance(value, (int, float)):
         return {"velocity": float(value), "acceleration": float(value), "jerk": float(value)}
@@ -147,8 +131,6 @@ def encode_rpc_value(value: Any) -> Any:
         return encode_rpc_value(item())
     if type(value).__name__ in {"PostureTask", "ManipulabilityTask"}:
         return encode_nullspace_task(value)
-    if type(value).__name__ == "CartesianImpedanceDynamicsMode":
-        return encode_cartesian_impedance_dynamics_mode(value)
     if type(value).__name__ == "FrictionCompensationParams":
         return encode_friction_compensation_params(value)
     return value
@@ -260,6 +242,7 @@ def encode_joint_impedance_fields(motion: Any) -> dict[str, Any]:
         "target_velocity": encode_vector(motion.target_velocity),
         "stiffness": encode_vector(field("stiffness")),
         "damping": encode_vector(field("damping")),
+        "error_clip": encode_vector(field("error_clip")),
         "constant_torque_offset": encode_vector(field("constant_torque_offset")),
         "lower_joint_limits": encode_vector(safety_field("lower_joint_limits")),
         "upper_joint_limits": encode_vector(safety_field("upper_joint_limits")),
@@ -298,7 +281,6 @@ def encode_cartesian_impedance_fields(motion: Any) -> dict[str, Any]:
         "translational_damping": None if (v := field("translational_damping")) is None else float(v),
         "rotational_damping": None if (v := field("rotational_damping")) is None else float(v),
         "force_constraints": encode_optional_float_vector(field("force_constraints")),
-        "dynamics_mode": encode_cartesian_impedance_dynamics_mode(field("dynamics_mode")),
         "nullspace_target": encode_vector(field("nullspace_target")),
         "nullspace_stiffness": None if nullspace_stiffness is None else float(nullspace_stiffness),
         "nullspace_tasks": encode_nullspace_tasks(field("nullspace_tasks")),
