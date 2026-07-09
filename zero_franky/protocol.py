@@ -90,30 +90,50 @@ def encode_friction_compensation_params(value: Any | None) -> dict[str, Any] | N
     }
 
 
-def encode_nullspace_task(value: Any) -> dict[str, Any]:
-    name = type(value).__name__
-    if name == "PostureTask" or hasattr(value, "target"):
-        return {
-            "type": "PostureTask",
-            "target": encode_vector(value.target),
-            "stiffness": float(value.stiffness),
-            "damping": None if value.damping is None else float(value.damping),
-            "max_torque": float(value.max_torque),
-        }
-    if name == "ManipulabilityTask" or hasattr(value, "finite_difference_step"):
-        return {
-            "type": "ManipulabilityTask",
-            "gain": float(value.gain),
-            "damping": float(value.damping),
-            "max_torque": float(value.max_torque),
-        }
-    raise ProtocolError(f"Cannot encode {type(value).__name__} as a nullspace task")
-
-
-def encode_nullspace_tasks(value: Any | None) -> list[dict[str, Any]] | None:
+def encode_matrix(value: Any | None) -> list[list[float]] | None:
     if value is None:
         return None
-    return [encode_nullspace_task(item) for item in value]
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        value = tolist()
+    return [[float(item) for item in row] for row in value]
+
+
+def encode_cartesian_diag(value: Any | None) -> list[float] | None:
+    if value is None:
+        return None
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        value = tolist()
+    rows = [list(row) if isinstance(row, (list, tuple)) else row for row in value]
+    if len(rows) == 6 and all(isinstance(row, (list, tuple)) for row in rows):
+        return [float(rows[i][i]) for i in range(6)]
+    return [float(item) for item in value]
+
+
+def encode_cartesian_gains(value: Any) -> dict[str, Any]:
+    if hasattr(value, "stiffness"):
+        return {
+            "stiffness": encode_matrix(value.stiffness),
+            "damping": encode_matrix(value.damping),
+        }
+    return {
+        "translational_stiffness": float(value.translational_stiffness),
+        "rotational_stiffness": float(value.rotational_stiffness),
+    }
+
+
+def encode_nullspace_gains(value: Any) -> dict[str, Any]:
+    return {
+        "posture_stiffness": float(value.posture_stiffness),
+        "posture_damping": None if value.posture_damping is None else float(value.posture_damping),
+        "posture_max_torque": None if value.posture_max_torque is None else float(value.posture_max_torque),
+        "manipulability_gain": float(value.manipulability_gain),
+        "manipulability_damping": float(value.manipulability_damping),
+        "manipulability_max_torque": (
+            None if value.manipulability_max_torque is None else float(value.manipulability_max_torque)
+        ),
+    }
 
 
 def encode_rpc_value(value: Any) -> Any:
@@ -129,10 +149,17 @@ def encode_rpc_value(value: Any) -> Any:
     item = getattr(value, "item", None)
     if callable(item):
         return encode_rpc_value(item())
-    if type(value).__name__ in {"PostureTask", "ManipulabilityTask"}:
-        return encode_nullspace_task(value)
     if type(value).__name__ == "FrictionCompensationParams":
         return encode_friction_compensation_params(value)
+    if type(value).__name__ == "CartesianImpedanceGains":
+        return encode_cartesian_gains(value)
+    if type(value).__name__ == "JointImpedanceGains":
+        return {
+            "stiffness": encode_rpc_value(value.stiffness),
+            "damping": encode_rpc_value(value.damping),
+        }
+    if type(value).__name__ == "NullspaceGains":
+        return encode_nullspace_gains(value)
     return value
 
 
@@ -253,8 +280,8 @@ def encode_joint_impedance_fields(motion: Any) -> dict[str, Any]:
         "joint_limit_damping": float(safety_field("joint_limit_damping")),
         "joint_limit_max_torque": float(safety_field("joint_limit_max_torque")),
         "friction": encode_friction_compensation_params(field("friction")),
-        "cartesian_stiffness": encode_vector(getattr(cartesian_gains, "stiffness", None)),
-        "cartesian_damping": encode_vector(getattr(cartesian_gains, "damping", None)),
+        "cartesian_stiffness": encode_cartesian_diag(getattr(cartesian_gains, "stiffness", None)),
+        "cartesian_damping": encode_cartesian_diag(getattr(cartesian_gains, "damping", None)),
     }
 
 
@@ -268,22 +295,33 @@ def encode_cartesian_impedance_fields(motion: Any) -> dict[str, Any]:
     def safety_field(name: str, default: Any = None) -> Any:
         return getattr(motion, name, getattr(safety, name, default))
 
-    nullspace_stiffness = field("nullspace_stiffness")
+    nullspace_tasks = list(field("nullspace_tasks") or [])
+    unsupported_tasks = [task for task in nullspace_tasks if type(task).__name__ != "PostureTask"]
+    if unsupported_tasks:
+        raise ProtocolError("CartesianImpedanceMotion only supports a posture nullspace task")
+    if len(nullspace_tasks) > 1:
+        raise ProtocolError("CartesianImpedanceMotion only supports one posture nullspace task")
+    posture_task = nullspace_tasks[0] if nullspace_tasks else None
+
     return {
         "target": encode_affine(motion.target),
+        "target_twist": (
+            encode_twist(motion.target_twist)
+            if getattr(motion, "target_twist", None) is not None
+            else None
+        ),
         "target_type": encode_reference_type(field("target_type")),
-        "stiffness": encode_cartesian_gain(field("stiffness")),
-        "damping": encode_cartesian_gain(field("damping")),
+        "stiffness": encode_matrix(field("stiffness")),
+        "damping": encode_matrix(field("damping")),
         "translational_stiffness": (
             None if (v := field("translational_stiffness")) is None else float(v)
         ),
         "rotational_stiffness": None if (v := field("rotational_stiffness")) is None else float(v),
-        "translational_damping": None if (v := field("translational_damping")) is None else float(v),
-        "rotational_damping": None if (v := field("rotational_damping")) is None else float(v),
         "force_constraints": encode_optional_float_vector(field("force_constraints")),
-        "nullspace_target": encode_vector(field("nullspace_target")),
-        "nullspace_stiffness": None if nullspace_stiffness is None else float(nullspace_stiffness),
-        "nullspace_tasks": encode_nullspace_tasks(field("nullspace_tasks")),
+        "nullspace_target": encode_vector(posture_task.target) if posture_task is not None else None,
+        "nullspace_stiffness": (
+            encode_rpc_value(posture_task.stiffness) if posture_task is not None else None
+        ),
         "max_delta_tau": float(safety_field("max_delta_tau")),
         "lower_joint_limits": encode_vector(safety_field("lower_joint_limits")),
         "upper_joint_limits": encode_vector(safety_field("upper_joint_limits")),
@@ -437,18 +475,24 @@ def encode_cartesian_impedance_motion(motion: Any) -> dict[str, Any]:
     return {
         "type": "CartesianImpedanceMotion",
         **encode_cartesian_impedance_fields(motion),
-        "duration": encode_duration(motion.duration),
-        "return_when_finished": bool(motion.return_when_finished),
-        "finish_wait_factor": float(motion.finish_wait_factor),
     }
 
 
-@motion_encoder("ExponentialImpedanceMotion")
-def encode_exponential_impedance_motion(motion: Any) -> dict[str, Any]:
+@motion_encoder("TorqueStopMotion")
+def encode_torque_stop_motion(motion: Any) -> dict[str, Any]:
+    params = getattr(motion, "params", motion)
+
+    def field(name: str, default: Any = None) -> Any:
+        return getattr(motion, name, getattr(params, name, default))
+
     return {
-        "type": "ExponentialImpedanceMotion",
-        **encode_cartesian_impedance_fields(motion),
-        "exponential_decay": float(motion.exponential_decay),
+        "type": "TorqueStopMotion",
+        "damping": encode_vector(field("damping")),
+        "ramp_duration": float(field("ramp_duration", 0.2)),
+        "velocity_epsilon": float(field("velocity_epsilon", 0.02)),
+        "max_duration": float(field("max_duration", 2.0)),
+        "compensate_coriolis": bool(field("compensate_coriolis", True)),
+        "max_delta_tau": float(field("max_delta_tau", 1.0)),
     }
 
 

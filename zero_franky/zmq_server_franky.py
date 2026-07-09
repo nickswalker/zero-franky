@@ -41,28 +41,15 @@ def _kwargs_without_none(payload: dict[str, Any], *keys: str):
     return {key: payload[key] for key in keys if payload.get(key) is not None}
 
 
-def _franky_nullspace_task(franky, payload: dict[str, Any]):
-    type_name = payload["type"]
-    if type_name == "PostureTask":
-        return franky.PostureTask(
-            payload["target"],
-            payload["stiffness"],
-            payload.get("damping"),
-            payload["max_torque"],
-        )
-    if type_name == "ManipulabilityTask":
-        return franky.ManipulabilityTask(
-            payload["gain"],
-            payload["damping"],
-            payload["max_torque"],
-        )
-    raise ValueError(f"Unsupported nullspace task type: {type_name}")
-
-
-def _franky_nullspace_tasks(franky, payload: list[dict[str, Any]] | None):
-    if payload is None:
-        return None
-    return [_franky_nullspace_task(franky, item) for item in payload]
+def _franky_nullspace_gains(franky, payload: dict[str, Any]):
+    gains = franky.NullspaceGains()
+    gains.posture_stiffness = payload.get("posture_stiffness", 0.0)
+    gains.posture_damping = payload.get("posture_damping")
+    gains.posture_max_torque = payload.get("posture_max_torque")
+    gains.manipulability_gain = payload.get("manipulability_gain", 0.0)
+    gains.manipulability_damping = payload.get("manipulability_damping", 0.0)
+    gains.manipulability_max_torque = payload.get("manipulability_max_torque")
+    return gains
 
 
 def _franky_friction_compensation_params(franky, payload: dict[str, Any] | None):
@@ -76,26 +63,48 @@ def _franky_friction_compensation_params(franky, payload: dict[str, Any] | None)
     )
 
 
+def _franky_cartesian_gains(franky, payload: dict[str, Any]):
+    if payload.get("stiffness") is not None:
+        gains = franky.CartesianImpedanceGains()
+        gains.stiffness = payload["stiffness"]
+        gains.damping = payload.get("damping")
+        return gains
+    translational_stiffness = payload.get("translational_stiffness")
+    rotational_stiffness = payload.get("rotational_stiffness")
+    if hasattr(franky.CartesianImpedanceGains, "isotropic"):
+        return franky.CartesianImpedanceGains.isotropic(
+            500.0 if translational_stiffness is None else translational_stiffness,
+            50.0 if rotational_stiffness is None else rotational_stiffness,
+            payload.get("translational_damping"),
+            payload.get("rotational_damping"),
+        )
+    return franky.CartesianImpedanceGains(
+        translational_stiffness=500.0 if translational_stiffness is None else translational_stiffness,
+        rotational_stiffness=50.0 if rotational_stiffness is None else rotational_stiffness,
+    )
+
+
 def franky_motion_kwargs(franky, kwargs: dict[str, Any] | None) -> dict[str, Any]:
     result = dict(kwargs or {})
-    if "nullspace_tasks" in result:
-        result["nullspace_tasks"] = _franky_nullspace_tasks(franky, result["nullspace_tasks"])
     if "friction" in result and isinstance(result["friction"], dict):
         result["friction"] = _franky_friction_compensation_params(franky, result["friction"])
     return result
 
 
 def _cartesian_impedance_kwargs(franky, payload: dict[str, Any]) -> dict[str, Any]:
+    translational_stiffness = payload.get("translational_stiffness")
+    rotational_stiffness = payload.get("rotational_stiffness")
+    stiffness = payload.get("stiffness")
+    if stiffness is not None and (translational_stiffness is None or rotational_stiffness is None):
+        translational_stiffness = stiffness[0][0]
+        rotational_stiffness = stiffness[3][3]
     kwargs = {
         "target_type": _franky_reference_type(franky, payload["target_type"]),
-        "stiffness": payload.get("stiffness"),
-        "damping": payload.get("damping"),
-        "translational_stiffness": payload.get("translational_stiffness"),
-        "rotational_stiffness": payload.get("rotational_stiffness"),
-        "translational_damping": payload.get("translational_damping"),
-        "rotational_damping": payload.get("rotational_damping"),
+        "translational_stiffness": translational_stiffness,
+        "rotational_stiffness": rotational_stiffness,
         "force_constraints": payload["force_constraints"],
-        "nullspace_tasks": _franky_nullspace_tasks(franky, payload.get("nullspace_tasks")),
+        "nullspace_target": payload.get("nullspace_target"),
+        "nullspace_stiffness": payload.get("nullspace_stiffness"),
         "max_delta_tau": payload["max_delta_tau"],
         "lower_joint_limits": payload["lower_joint_limits"],
         "upper_joint_limits": payload["upper_joint_limits"],
@@ -137,6 +146,14 @@ def _franky_robot_velocity(franky, payload: dict[str, Any]):
     if payload["type"] == "Twist":
         return _franky_twist(franky, payload["value"])
     raise ValueError(f"Unsupported robot velocity type: {payload['type']}")
+
+
+def _franky_joint_reference(franky, position, velocity=None, torque_feedforward=None):
+    return franky.JointReference(position, velocity, torque_feedforward)
+
+
+def _franky_cartesian_reference(franky, target, target_twist=None, target_acceleration=None):
+    return franky.CartesianReference(target, target_twist, target_acceleration)
 
 
 def _franky_position_waypoint(franky, waypoint: dict[str, Any], cls, target_builder):
@@ -297,7 +314,6 @@ def build_joint_impedance_motion(franky, payload: dict[str, Any]):
         "target_velocity",
         "stiffness",
         "damping",
-        "error_clip",
         "constant_torque_offset",
         "lower_joint_limits",
         "upper_joint_limits",
@@ -314,30 +330,30 @@ def build_joint_impedance_motion(franky, payload: dict[str, Any]):
             "joint_limit_max_torque": payload["joint_limit_max_torque"],
         }
     )
-    friction = _franky_friction_compensation_params(franky, payload.get("friction"))
+    friction = payload.get("friction")
     if friction is not None:
-        kwargs["friction"] = friction
+        kwargs["friction"] = _franky_friction_compensation_params(franky, friction)
     return franky.JointImpedanceMotion(payload["target"], **kwargs)
 
 
 @motion_builder("CartesianImpedanceMotion")
 def build_cartesian_impedance_motion(franky, payload: dict[str, Any]):
     kwargs = _cartesian_impedance_kwargs(franky, payload)
-    kwargs.update(
-        {
-            "return_when_finished": payload["return_when_finished"],
-            "finish_wait_factor": payload["finish_wait_factor"],
-        }
-    )
+    target_twist = payload.get("target_twist")
     return franky.CartesianImpedanceMotion(
         _franky_affine(franky, payload["target"]),
-        _franky_duration(franky, payload["duration"]),
+        _franky_twist(franky, target_twist) if target_twist is not None else None,
         **kwargs,
     )
 
 
-@motion_builder("ExponentialImpedanceMotion")
-def build_exponential_impedance_motion(franky, payload: dict[str, Any]):
-    kwargs = _cartesian_impedance_kwargs(franky, payload)
-    kwargs["exponential_decay"] = payload["exponential_decay"]
-    return franky.ExponentialImpedanceMotion(_franky_affine(franky, payload["target"]), **kwargs)
+@motion_builder("TorqueStopMotion")
+def build_torque_stop_motion(franky, payload: dict[str, Any]):
+    return franky.TorqueStopMotion(
+        damping=payload.get("damping"),
+        ramp_duration=payload["ramp_duration"],
+        velocity_epsilon=payload["velocity_epsilon"],
+        max_duration=payload["max_duration"],
+        compensate_coriolis=payload["compensate_coriolis"],
+        max_delta_tau=payload["max_delta_tau"],
+    )

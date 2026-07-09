@@ -120,24 +120,20 @@ class TrackerSessionProxy:
             },
         )
 
-    def set_joint_gains(self, stiffness: list[float], damping: list[float]):
+    def set_joint_gains(self, stiffness: list[float] | Any, damping: list[float] | None = None):
         if self._kind != "joint":
             raise RuntimeError("set_joint_gains is only valid for joint tracker sessions")
+        if damping is None and hasattr(stiffness, "stiffness") and hasattr(stiffness, "damping"):
+            damping = stiffness.damping
+            stiffness = stiffness.stiffness
         return self._client.call(
             "tracker.set_joint_gains",
-            {"session_id": self._id, "stiffness": stiffness, "damping": damping},
-        )
-
-    def set_joint_cartesian_gains(self, stiffness: list[float], damping: list[float] | None = None):
-        if self._kind != "joint":
-            raise RuntimeError("set_joint_cartesian_gains is only valid for joint tracker sessions")
-        return self._client.call(
-            "tracker.set_joint_cartesian_gains",
-            {"session_id": self._id, "stiffness": stiffness, "damping": damping},
+            {"session_id": self._id, "stiffness": encode_rpc_value(stiffness), "damping": encode_rpc_value(damping)},
         )
 
     def set_cartesian_gains(
         self,
+        gains=None,
         *,
         stiffness=None,
         damping=None,
@@ -148,37 +144,94 @@ class TrackerSessionProxy:
     ):
         if self._kind != "cartesian":
             raise RuntimeError("set_cartesian_gains is only valid for Cartesian tracker sessions")
-        gains = {
-            "stiffness": encode_rpc_value(stiffness),
-            "damping": encode_rpc_value(damping),
-            "translational_stiffness": translational_stiffness,
-            "rotational_stiffness": rotational_stiffness,
-            "translational_damping": translational_damping,
-            "rotational_damping": rotational_damping,
-        }
-        return self._client.call("tracker.set_cartesian_gains", {"session_id": self._id, "gains": gains})
+        if gains is not None:
+            if any(
+                value is not None
+                for value in (
+                    stiffness,
+                    damping,
+                    translational_stiffness,
+                    rotational_stiffness,
+                    translational_damping,
+                    rotational_damping,
+                )
+            ):
+                raise ValueError("Pass either gains or decomposed Cartesian gain fields, not both")
+            payload = encode_rpc_value(gains)
+        else:
+            payload = {
+                "stiffness": encode_rpc_value(stiffness),
+                "damping": encode_rpc_value(damping),
+                "translational_stiffness": translational_stiffness,
+                "rotational_stiffness": rotational_stiffness,
+                "translational_damping": translational_damping,
+                "rotational_damping": rotational_damping,
+            }
+        return self._client.call("tracker.set_cartesian_gains", {"session_id": self._id, "gains": payload})
+
+    def set_joint_cartesian_gains(
+        self,
+        gains=None,
+        *,
+        stiffness=None,
+        damping=None,
+        translational_stiffness: float | None = None,
+        rotational_stiffness: float | None = None,
+        translational_damping: float | None = None,
+        rotational_damping: float | None = None,
+    ):
+        if self._kind != "joint":
+            raise RuntimeError("set_joint_cartesian_gains is only valid for joint tracker sessions")
+        if gains is not None:
+            if any(
+                value is not None
+                for value in (
+                    stiffness,
+                    damping,
+                    translational_stiffness,
+                    rotational_stiffness,
+                    translational_damping,
+                    rotational_damping,
+                )
+            ):
+                raise ValueError("Pass either gains or decomposed Cartesian gain fields, not both")
+            payload = encode_rpc_value(gains)
+        else:
+            payload = {
+                "stiffness": encode_rpc_value(stiffness),
+                "damping": encode_rpc_value(damping),
+                "translational_stiffness": translational_stiffness,
+                "rotational_stiffness": rotational_stiffness,
+                "translational_damping": translational_damping,
+                "rotational_damping": rotational_damping,
+            }
+        return self._client.call("tracker.set_joint_cartesian_gains", {"session_id": self._id, "gains": payload})
 
     def set_nullspace_gains(
         self,
+        gains=None,
         *,
         posture_stiffness: float = 0.0,
         posture_damping: float | None = None,
-        posture_max_torque: float = 0.0,
+        posture_max_torque: float | None = None,
         manipulability_gain: float = 0.0,
         manipulability_damping: float = 0.0,
-        manipulability_max_torque: float = 0.0,
+        manipulability_max_torque: float | None = None,
     ):
         if self._kind != "cartesian":
             raise RuntimeError("set_nullspace_gains is only valid for Cartesian tracker sessions")
-        gains = {
-            "posture_stiffness": posture_stiffness,
-            "posture_damping": posture_damping,
-            "posture_max_torque": posture_max_torque,
-            "manipulability_gain": manipulability_gain,
-            "manipulability_damping": manipulability_damping,
-            "manipulability_max_torque": manipulability_max_torque,
-        }
-        return self._client.call("tracker.set_nullspace_gains", {"session_id": self._id, "gains": gains})
+        if gains is not None:
+            payload = encode_rpc_value(gains)
+        else:
+            payload = {
+                "posture_stiffness": posture_stiffness,
+                "posture_damping": posture_damping,
+                "posture_max_torque": posture_max_torque,
+                "manipulability_gain": manipulability_gain,
+                "manipulability_damping": manipulability_damping,
+                "manipulability_max_torque": manipulability_max_torque,
+            }
+        return self._client.call("tracker.set_nullspace_gains", {"session_id": self._id, "gains": payload})
 
 
 class ZmqRpcClient:
