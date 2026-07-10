@@ -58,7 +58,7 @@ robot.join_motion()
 On the robot host:
 
 ```bash
-zero-franky-server
+zero-franky server
 ```
 
 By default this binds RPC on `tcp://0.0.0.0:18812`, state PUB on `tcp://0.0.0.0:18813`, and tracker updates on `tcp://0.0.0.0:18814`.
@@ -66,8 +66,40 @@ By default this binds RPC on `tcp://0.0.0.0:18812`, state PUB on `tcp://0.0.0.0:
 Common overrides:
 
 ```bash
-zero-franky-server --host 192.168.1.20 --port 18812
-zero-franky-server --port 19000 --no-pub
+zero-franky server --host 192.168.1.20 --port 18812
+zero-franky server --port 19000 --no-pub
+```
+
+### Robotiq gripper
+
+Robotiq 2F-85 support is optional. Install both control-machine extras only on hosts
+that physically run the robot and gripper services:
+
+```bash
+pip install 'zero-franky[server,robotiq]'
+```
+
+The base installation contains the network client and does not import or
+require `pyrobotiqgripper`.
+
+Run the robot server together with the gripper server with `--robotiq`:
+
+```bash
+zero-franky server --robotiq --com-port auto
+```
+
+Or run the gripper service on its own (e.g. on a different host, or the robot
+server is already running separately):
+
+```bash
+zero-franky gripper serve --com-port auto
+```
+
+The `gripper` subcommand also provides diagnostic client commands:
+
+```bash
+zero-franky gripper status --host control-machine
+zero-franky gripper open --host control-machine
 ```
 
 The equivalent Python entry point is:

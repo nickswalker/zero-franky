@@ -14,16 +14,19 @@ def tcp_endpoint(host: str, port: int) -> str:
     return f"tcp://{host}:{port}"
 
 
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the zero_franky ZeroMQ robot server")
+def add_server_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--host", default=DEFAULT_HOST, help=f"Interface to bind RPC/PUB sockets on [{DEFAULT_HOST}]")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"RPC port [{DEFAULT_PORT}]")
     parser.add_argument("--no-pub", action="store_true", help="Disable state PUB and tracker update sockets")
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the zero_franky ZeroMQ robot server")
+    add_server_arguments(parser)
     return parser.parse_args(argv)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv)
+def run(args: argparse.Namespace) -> int:
     bind = tcp_endpoint(args.host, args.port)
     pub_bind = None if args.no_pub else tcp_endpoint(args.host, args.port + STATE_PORT_OFFSET)
     tracker_bind = None if args.no_pub else tcp_endpoint(args.host, args.port + TRACKER_PORT_OFFSET)
@@ -43,6 +46,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("zero_franky server stopped", flush=True)
         return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    return run(parse_args(argv))
 
 
 if __name__ == "__main__":

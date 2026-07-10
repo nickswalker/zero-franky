@@ -7,7 +7,7 @@ name = "zero-franky"
 version = "0.1.2"
 description = "ZeroMQ client/server bridge for franky"
 readme = "README.md"
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.9,<3.15"
 authors = [
 	{ name = "Nick Walker" }
 ]
@@ -19,8 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-zero-franky-server = "zero_franky.server_cli:main"
-zero_franky_server = "zero_franky.server_cli:main"
+zero-franky = "zero_franky.cli:main"
 
 [project.optional-dependencies]
 
@@ -28,17 +27,19 @@ server = [
     "franky-control"
     ]
 
+robotiq = [
+    "pyrobotiqgripper",
+]
+
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0"
     ]
 
+[[tool.uv.index]]
+name = "franky-fork-libfranka-0-21-2"
+url = "https://nickswalker.github.io/franky/whl/libfranka-0.21.2/"
+explicit = true
+
 [tool.uv.sources]
-franky-control = [
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4+impedance.libfranka.0.21.2-cp39-cp39-manylinux_2_28_x86_64.whl", marker = "python_version == '3.9'" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4+impedance.libfranka.0.21.2-cp310-cp310-manylinux_2_28_x86_64.whl", marker = "python_version == '3.10'" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4+impedance.libfranka.0.21.2-cp311-cp311-manylinux_2_28_x86_64.whl", marker = "python_version == '3.11'" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4+impedance.libfranka.0.21.2-cp312-cp312-manylinux_2_28_x86_64.whl", marker = "python_version == '3.12'" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4+impedance.libfranka.0.21.2-cp312-cp312-manylinux_2_28_x86_64.whl", marker = "python_version == '3.13'" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4+impedance.libfranka.0.21.2-cp314-cp314-manylinux_2_28_x86_64.whl", marker = "python_version == '3.14'" },
-]
+franky-control = { index = "franky-fork-libfranka-0-21-2" }
