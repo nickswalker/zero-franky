@@ -1,10 +1,17 @@
 # Changelog
 
-## [0.1.2] - Unreleased
+## [0.1.2] - 2026-07-14
 
 ### Added
 
-- Wrap cartesian impedance damping parameters
+- Optional Robotiq gripper server and CLI support
+- Cartesian friction and acceleration reference support
+- Cartesian impedance damping parameters
+
+### Changed
+
+- Update tracker/gains interfaces to match latest `franky`
+- Drop dynamics mode
 
 ### Fixed
 
@@ -34,5 +41,6 @@
 - Msgpack protocol support for common robot commands, motion payloads, telemetry, and tracker sessions.
 - Joint and Cartesian impedance tracker session support, including import-based and `cloudpickle` policy transports.
 
+[0.1.2]: https://github.com/nickswalker/zero-franky/releases/tag/v0.1.2
 [0.1.1]: https://github.com/nickswalker/zero-franky/releases/tag/v0.1.1
 [0.1.0]: https://github.com/nickswalker/zero-franky/releases/tag/v0.1.0
