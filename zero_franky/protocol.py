@@ -125,8 +125,8 @@ def encode_cartesian_gains(value: Any) -> dict[str, Any]:
 
 def encode_nullspace_gains(value: Any) -> dict[str, Any]:
     return {
-        "posture_stiffness": float(value.posture_stiffness),
-        "posture_damping": None if value.posture_damping is None else float(value.posture_damping),
+        "posture_stiffness": encode_rpc_value(value.posture_stiffness),
+        "posture_damping": encode_rpc_value(value.posture_damping),
         "posture_max_torque": None if value.posture_max_torque is None else float(value.posture_max_torque),
         "manipulability_gain": float(value.manipulability_gain),
         "manipulability_damping": float(value.manipulability_damping),
@@ -160,6 +160,19 @@ def encode_rpc_value(value: Any) -> Any:
         }
     if type(value).__name__ == "NullspaceGains":
         return encode_nullspace_gains(value)
+    if type(value).__name__ == "PostureTask":
+        return {
+            "target": encode_vector(value.target),
+            "stiffness": encode_rpc_value(value.stiffness),
+            "damping": encode_rpc_value(value.damping),
+            "max_torque": None if value.max_torque is None else float(value.max_torque),
+        }
+    if type(value).__name__ == "ManipulabilityTask":
+        return {
+            "gain": float(value.gain),
+            "damping": float(value.damping),
+            "max_torque": None if value.max_torque is None else float(value.max_torque),
+        }
     return value
 
 
@@ -296,12 +309,18 @@ def encode_cartesian_impedance_fields(motion: Any) -> dict[str, Any]:
         return getattr(motion, name, getattr(safety, name, default))
 
     nullspace_tasks = list(field("nullspace_tasks") or [])
-    unsupported_tasks = [task for task in nullspace_tasks if type(task).__name__ != "PostureTask"]
+    unsupported_tasks = [
+        task for task in nullspace_tasks
+        if type(task).__name__ not in {"PostureTask", "ManipulabilityTask"}
+    ]
     if unsupported_tasks:
-        raise ProtocolError("CartesianImpedanceMotion only supports a posture nullspace task")
-    if len(nullspace_tasks) > 1:
-        raise ProtocolError("CartesianImpedanceMotion only supports one posture nullspace task")
-    posture_task = nullspace_tasks[0] if nullspace_tasks else None
+        raise ProtocolError("Unsupported Cartesian impedance nullspace task")
+    posture_tasks = [task for task in nullspace_tasks if type(task).__name__ == "PostureTask"]
+    manipulability_tasks = [task for task in nullspace_tasks if type(task).__name__ == "ManipulabilityTask"]
+    if len(posture_tasks) > 1 or len(manipulability_tasks) > 1:
+        raise ProtocolError("CartesianImpedanceMotion supports at most one nullspace task of each type")
+    posture_task = posture_tasks[0] if posture_tasks else None
+    manipulability_task = manipulability_tasks[0] if manipulability_tasks else None
 
     return {
         "target": encode_affine(motion.target),
@@ -318,10 +337,8 @@ def encode_cartesian_impedance_fields(motion: Any) -> dict[str, Any]:
         ),
         "rotational_stiffness": None if (v := field("rotational_stiffness")) is None else float(v),
         "force_constraints": encode_optional_float_vector(field("force_constraints")),
-        "nullspace_target": encode_vector(posture_task.target) if posture_task is not None else None,
-        "nullspace_stiffness": (
-            encode_rpc_value(posture_task.stiffness) if posture_task is not None else None
-        ),
+        "posture_task": encode_rpc_value(posture_task),
+        "manipulability_task": encode_rpc_value(manipulability_task),
         "max_delta_tau": float(safety_field("max_delta_tau")),
         "lower_joint_limits": encode_vector(safety_field("lower_joint_limits")),
         "upper_joint_limits": encode_vector(safety_field("upper_joint_limits")),

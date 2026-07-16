@@ -211,8 +211,8 @@ class TrackerSessionProxy:
         self,
         gains=None,
         *,
-        posture_stiffness: float = 0.0,
-        posture_damping: float | None = None,
+        posture_stiffness: Any = 0.0,
+        posture_damping: Any | None = None,
         posture_max_torque: float | None = None,
         manipulability_gain: float = 0.0,
         manipulability_damping: float = 0.0,
@@ -224,8 +224,8 @@ class TrackerSessionProxy:
             payload = encode_rpc_value(gains)
         else:
             payload = {
-                "posture_stiffness": posture_stiffness,
-                "posture_damping": posture_damping,
+                "posture_stiffness": encode_rpc_value(posture_stiffness),
+                "posture_damping": encode_rpc_value(posture_damping),
                 "posture_max_torque": posture_max_torque,
                 "manipulability_gain": manipulability_gain,
                 "manipulability_damping": manipulability_damping,

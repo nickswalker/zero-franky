@@ -52,6 +52,20 @@ def _franky_nullspace_gains(franky, payload: dict[str, Any]):
     return gains
 
 
+def _franky_posture_task(franky, payload: dict[str, Any] | None):
+    if payload is None:
+        return None
+    return franky.PostureTask(
+        payload["target"], payload["stiffness"], payload.get("damping"), payload.get("max_torque")
+    )
+
+
+def _franky_manipulability_task(franky, payload: dict[str, Any] | None):
+    if payload is None:
+        return None
+    return franky.ManipulabilityTask(payload["gain"], payload.get("damping", 0.0), payload.get("max_torque"))
+
+
 def _franky_friction_compensation_params(franky, payload: dict[str, Any] | None):
     if payload is None:
         return None
@@ -88,6 +102,10 @@ def franky_motion_kwargs(franky, kwargs: dict[str, Any] | None) -> dict[str, Any
     result = dict(kwargs or {})
     if "friction" in result and isinstance(result["friction"], dict):
         result["friction"] = _franky_friction_compensation_params(franky, result["friction"])
+    if "posture_task" in result and isinstance(result["posture_task"], dict):
+        result["posture_task"] = _franky_posture_task(franky, result["posture_task"])
+    if "manipulability_task" in result and isinstance(result["manipulability_task"], dict):
+        result["manipulability_task"] = _franky_manipulability_task(franky, result["manipulability_task"])
     return result
 
 
@@ -103,8 +121,8 @@ def _cartesian_impedance_kwargs(franky, payload: dict[str, Any]) -> dict[str, An
         "translational_stiffness": translational_stiffness,
         "rotational_stiffness": rotational_stiffness,
         "force_constraints": payload["force_constraints"],
-        "nullspace_target": payload.get("nullspace_target"),
-        "nullspace_stiffness": payload.get("nullspace_stiffness"),
+        "posture_task": _franky_posture_task(franky, payload.get("posture_task")),
+        "manipulability_task": _franky_manipulability_task(franky, payload.get("manipulability_task")),
         "max_delta_tau": payload["max_delta_tau"],
         "lower_joint_limits": payload["lower_joint_limits"],
         "upper_joint_limits": payload["upper_joint_limits"],
