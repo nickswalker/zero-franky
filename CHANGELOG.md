@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3] - 2026-07-16
+
+### Changed
+
+- Replace the Cartesian impedance tracker’s legacy nullspace target/stiffness parameters with explicit posture and manipulability tasks
+- Support scalar and per-joint posture stiffness and damping in runtime nullspace gains
+
 ## [0.1.2] - 2026-07-14
 
 ### Added
@@ -41,6 +48,7 @@
 - Msgpack protocol support for common robot commands, motion payloads, telemetry, and tracker sessions.
 - Joint and Cartesian impedance tracker session support, including import-based and `cloudpickle` policy transports.
 
+[0.1.3]: https://github.com/nickswalker/zero-franky/releases/tag/v0.1.3
 [0.1.2]: https://github.com/nickswalker/zero-franky/releases/tag/v0.1.2
 [0.1.1]: https://github.com/nickswalker/zero-franky/releases/tag/v0.1.1
 [0.1.0]: https://github.com/nickswalker/zero-franky/releases/tag/v0.1.0
