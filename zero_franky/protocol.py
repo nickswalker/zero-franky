@@ -13,6 +13,22 @@ class UnsupportedMotionType(TypeError):
     pass
 
 
+class RpcError(RuntimeError):
+    """Raised on the client when a remote zero_franky RPC call fails."""
+
+
+def format_exception(exc: BaseException) -> str:
+    """Render an exception as `TypeName: message`, without stdlib repr quirks.
+
+    KeyError.__str__ reprs its argument (so `KeyError("Unknown robot id: x")`
+    stringifies as `"Unknown robot id: x"` with the quotes included) - special
+    case it so messages crossing the RPC boundary read the same as they were
+    raised, instead of picking up stray quoting.
+    """
+    message = str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
 MOTION_ENCODERS = {}
 
 

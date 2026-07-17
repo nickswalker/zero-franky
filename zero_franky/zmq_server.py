@@ -7,6 +7,8 @@ import uuid
 import msgpack
 import zmq
 
+from zero_franky.protocol import format_exception
+
 
 RPC_HANDLERS = {}
 
@@ -341,14 +343,15 @@ class ZmqRobotServer:
             result = self.dispatch(request["method"], request.get("params", {}))
             response = {"id": request["id"], "ok": True, "result": result}
         except Exception as exc:
-            response = {"id": request.get("id"), "ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            response = {"id": request.get("id"), "ok": False, "error": format_exception(exc)}
         self._socket.send(msgpack.packb(response, use_bin_type=True))
 
     def dispatch(self, method: str, params: dict[str, Any]):
         try:
-            return RPC_HANDLERS[method](self._manager, params)
+            handler = RPC_HANDLERS[method]
         except KeyError as exc:
             raise NotImplementedError(method) from exc
+        return handler(self._manager, params)
 
 
 @rpc_handler("robot.create")

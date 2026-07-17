@@ -40,6 +40,20 @@ DEFAULT_BIND_HOST = "0.0.0.0"
 DEFAULT_GRIPPER_MAX_WIDTH_M = 0.085
 
 
+class RpcError(RuntimeError):
+    """Raised on the client when a remote gripper RPC call fails."""
+
+
+def _format_exception(exc: BaseException) -> str:
+    """Render an exception as `TypeName: message`, without stdlib repr quirks.
+
+    KeyError.__str__ reprs its argument, so this special-cases it to keep
+    messages crossing the RPC boundary free of stray quoting.
+    """
+    message = str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -250,7 +264,7 @@ class ZmqGripperServer:
             result = self._dispatch(request["method"], request.get("params", {}))
             response = {"id": request["id"], "ok": True, "result": result}
         except Exception as exc:
-            response = {"id": request.get("id"), "ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            response = {"id": request.get("id"), "ok": False, "error": _format_exception(exc)}
         self._socket.send(msgpack.packb(response, use_bin_type=True))
 
     def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
@@ -342,19 +356,32 @@ class _ZmqRpcClient:
         sock = ctx.socket(zmq.REQ)
         sock.setsockopt(zmq.RCVTIMEO, timeout_ms)
         sock.setsockopt(zmq.SNDTIMEO, timeout_ms)
-        sock.connect(f"tcp://{host}:{port}")
+        self._endpoint = f"tcp://{host}:{port}"
+        self._timeout_ms = timeout_ms
+        sock.connect(self._endpoint)
         self._socket = sock
 
     def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
         import msgpack
+        import zmq
 
         req_id = uuid.uuid4().hex
-        self._socket.send(msgpack.packb({"id": req_id, "method": method, "params": params or {}}, use_bin_type=True))
-        response = msgpack.unpackb(self._socket.recv(), raw=False)
+        try:
+            self._socket.send(
+                msgpack.packb({"id": req_id, "method": method, "params": params or {}}, use_bin_type=True)
+            )
+            response = msgpack.unpackb(self._socket.recv(), raw=False)
+        except zmq.Again as exc:
+            raise TimeoutError(
+                f"RPC call {method!r} to {self._endpoint} timed out after {self._timeout_ms} ms; "
+                "is the gripper server running and reachable?"
+            ) from exc
+        except zmq.ZMQError as exc:
+            raise ConnectionError(f"RPC call {method!r} to {self._endpoint} failed: {exc}") from exc
         if response.get("id") != req_id:
-            raise RuntimeError(f"RPC response id mismatch for {method}")
+            raise RpcError(f"RPC response id mismatch for {method!r}")
         if not response.get("ok", False):
-            raise RuntimeError(response.get("error", "Unknown RPC error"))
+            raise RpcError(f"{method!r} failed: {response.get('error', 'Unknown RPC error')}")
         return response.get("result")
 
     def close(self) -> None:

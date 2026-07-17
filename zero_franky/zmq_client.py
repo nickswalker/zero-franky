@@ -8,6 +8,7 @@ import msgpack
 import zmq
 
 from zero_franky.protocol import (
+    RpcError,
     RpcRequest,
     encode_affine,
     encode_motion,
@@ -240,16 +241,26 @@ class ZmqRpcClient:
         self._socket = self._context.socket(zmq.REQ)
         self._socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
         self._socket.setsockopt(zmq.SNDTIMEO, timeout_ms)
-        self._socket.connect(f"tcp://{host}:{port}")
+        self._endpoint = f"tcp://{host}:{port}"
+        self._timeout_ms = timeout_ms
+        self._socket.connect(self._endpoint)
 
     def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
         request = RpcRequest.create(method, params)
-        self._socket.send(msgpack.packb(request.__dict__, use_bin_type=True))
-        response = msgpack.unpackb(self._socket.recv(), raw=False)
+        try:
+            self._socket.send(msgpack.packb(request.__dict__, use_bin_type=True))
+            response = msgpack.unpackb(self._socket.recv(), raw=False)
+        except zmq.Again as exc:
+            raise TimeoutError(
+                f"RPC call {method!r} to {self._endpoint} timed out after {self._timeout_ms} ms; "
+                "is the zero_franky server running and reachable?"
+            ) from exc
+        except zmq.ZMQError as exc:
+            raise ConnectionError(f"RPC call {method!r} to {self._endpoint} failed: {exc}") from exc
         if response.get("id") != request.id:
-            raise RuntimeError(f"RPC response id mismatch for {method}")
+            raise RpcError(f"RPC response id mismatch for {method!r}")
         if not response.get("ok", False):
-            raise RuntimeError(response.get("error", "Unknown RPC error"))
+            raise RpcError(f"{method!r} failed: {response.get('error', 'Unknown RPC error')}")
         return response.get("result")
 
 
