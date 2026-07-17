@@ -20,6 +20,9 @@ class StatePublisher:
             ]
         )
 
+    def close(self) -> None:
+        self._socket.close(linger=0)
+
 
 class StateSubscriber:
     def __init__(

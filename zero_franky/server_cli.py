@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import signal
 from collections.abc import Sequence
 
 
@@ -26,7 +27,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def run(args: argparse.Namespace) -> int:
+def build_server(args: argparse.Namespace):
     bind = tcp_endpoint(args.host, args.port)
     pub_bind = None if args.no_pub else tcp_endpoint(args.host, args.port + STATE_PORT_OFFSET)
     tracker_bind = None if args.no_pub else tcp_endpoint(args.host, args.port + TRACKER_PORT_OFFSET)
@@ -40,12 +41,31 @@ def run(args: argparse.Namespace) -> int:
         print(f"zero_franky state pub on {pub_bind}", flush=True)
         print(f"zero_franky tracker updates on {tracker_bind}", flush=True)
 
-    server = ZmqRobotServer(bind=bind, pub_bind=pub_bind, tracker_bind=tracker_bind)
+    return ZmqRobotServer(bind=bind, pub_bind=pub_bind, tracker_bind=tracker_bind)
+
+
+def run(args: argparse.Namespace) -> int:
+    """Run a server built from `args` in the current (main) thread.
+
+    Installs a SIGTERM handler on top of the normal KeyboardInterrupt (SIGINT)
+    handling so process managers that send SIGTERM also get a clean shutdown:
+    active tracker sessions/robots are stopped and sockets closed before exit.
+    Only call this from the main thread; `signal.signal` requires it.
+    """
+    server = build_server(args)
+
+    def handle_sigterm(_signum, _frame):
+        raise KeyboardInterrupt
+
+    previous_sigterm = signal.signal(signal.SIGTERM, handle_sigterm)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("zero_franky server stopped", flush=True)
-        return 0
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
+        server.shutdown()
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

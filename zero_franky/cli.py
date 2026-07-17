@@ -73,13 +73,14 @@ def run_server(args: argparse.Namespace) -> int:
     if not args.robotiq:
         return server_cli.run(args)
 
+    server = server_cli.build_server(args)
     gripper = subprocess.Popen(gripper_command(args))
 
     def stop_on_signal(_signum, _frame):
         raise KeyboardInterrupt
 
     previous_term = signal.signal(signal.SIGTERM, stop_on_signal)
-    server_thread = threading.Thread(target=server_cli.run, args=(args,), daemon=True)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     try:
         while server_thread.is_alive():
@@ -93,6 +94,8 @@ def run_server(args: argparse.Namespace) -> int:
         return 0
     finally:
         signal.signal(signal.SIGTERM, previous_term)
+        server.shutdown()
+        server_thread.join(timeout=3.0)
         _terminate(gripper)
 
 

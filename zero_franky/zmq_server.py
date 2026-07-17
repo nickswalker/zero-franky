@@ -187,6 +187,22 @@ class RobotManager:
         except KeyError as exc:
             raise KeyError(f"Unknown tracker session id: {session_id}") from exc
 
+    def shutdown(self) -> None:
+        for session_id in list(self._tracker_sessions):
+            try:
+                self.stop_tracker(session_id)
+            except Exception:
+                pass
+        for robot_id in list(self._robots):
+            try:
+                self.stop(robot_id)
+            except Exception:
+                pass
+
+    def close(self) -> None:
+        if self._state_publisher is not None:
+            self._state_publisher.close()
+
     def get_last_teleop_state(self, robot_id: str):
         try:
             return self._latest_state[robot_id]
@@ -228,37 +244,46 @@ class _TrackerUpdateListener:
         sock.bind(bind)
         self._sock = sock
         self._manager = manager
+        self._stop_event = threading.Event()
         thread = threading.Thread(target=self._run, name="zero-franky-tracker-listener", daemon=True)
         thread.start()
+        self._thread = thread
 
     def _run(self):
-        while True:
-            try:
-                raw = self._sock.recv()
-            except zmq.Again:
-                continue
-            except zmq.ZMQError:
-                return
-            msg = msgpack.unpackb(raw, raw=False)
-            session_id = msg.get("session_id")
-            kind = msg.get("kind")
-            try:
-                if kind == "joint":
-                    self._manager.set_joint_tracker_reference(
-                        session_id,
-                        msg["position"],
-                        msg.get("velocity"),
-                        msg.get("torque_feedforward"),
-                    )
-                elif kind == "cartesian":
-                    self._manager.set_cartesian_tracker_reference(
-                        session_id,
-                        msg["target"],
-                        msg.get("target_twist"),
-                        msg.get("target_acceleration"),
-                    )
-            except Exception:
-                pass
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    raw = self._sock.recv()
+                except zmq.Again:
+                    continue
+                except zmq.ZMQError:
+                    return
+                msg = msgpack.unpackb(raw, raw=False)
+                session_id = msg.get("session_id")
+                kind = msg.get("kind")
+                try:
+                    if kind == "joint":
+                        self._manager.set_joint_tracker_reference(
+                            session_id,
+                            msg["position"],
+                            msg.get("velocity"),
+                            msg.get("torque_feedforward"),
+                        )
+                    elif kind == "cartesian":
+                        self._manager.set_cartesian_tracker_reference(
+                            session_id,
+                            msg["target"],
+                            msg.get("target_twist"),
+                            msg.get("target_acceleration"),
+                        )
+                except Exception:
+                    pass
+        finally:
+            self._sock.close(linger=0)
+
+    def stop(self, timeout: float = 1.0) -> None:
+        self._stop_event.set()
+        self._thread.join(timeout)
 
 
 class ZmqRobotServer:
@@ -271,18 +296,44 @@ class ZmqRobotServer:
     ):
         self._context = zmq.Context.instance()
         self._socket = self._context.socket(zmq.REP)
+        self._socket.setsockopt(zmq.RCVTIMEO, 200)
         self._socket.bind(bind)
         if manager is None and pub_bind is not None:
             from zero_franky.pubsub import StatePublisher
 
             manager = RobotManager(StatePublisher(pub_bind))
         self._manager = manager or RobotManager()
-        if tracker_bind is not None:
-            _TrackerUpdateListener(tracker_bind, self._manager)
+        self._tracker_listener = (
+            _TrackerUpdateListener(tracker_bind, self._manager) if tracker_bind is not None else None
+        )
+        self._stop_event = threading.Event()
 
     def serve_forever(self):
-        while True:
-            self.serve_once()
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    self.serve_once()
+                except zmq.Again:
+                    continue
+        finally:
+            # Order matters: stop robots/trackers (no RPC can be in flight once the
+            # loop above has exited) before tearing down the sockets they publish
+            # through, all from this thread so nothing else touches the sockets.
+            self._manager.shutdown()
+            if self._tracker_listener is not None:
+                self._tracker_listener.stop()
+            self._manager.close()
+            self._socket.close(linger=0)
+
+    def shutdown(self) -> None:
+        """Signal serve_forever to stop.
+
+        Safe to call from a different thread than the one running serve_forever,
+        including before serve_forever has started: it only sets an event, never
+        touching robots/trackers/sockets directly. All teardown happens once,
+        inside serve_forever's own finally, in the thread that owns those resources.
+        """
+        self._stop_event.set()
 
     def serve_once(self):
         request = msgpack.unpackb(self._socket.recv(), raw=False)
