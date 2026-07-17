@@ -21,13 +21,17 @@ Client side:
     gripper.open()
     gripper.close()
 
-    # Subscribe to state broadcasts published after each command:
-    sub = gripper.state_subscriber()
-    topic, state = sub.recv()   # {"position": int|None, "status": {...}}
+    # The server polls the gripper and publishes state continuously (in addition
+    # to publishing immediately after each command). Read the latest broadcast
+    # without blocking the caller:
+    cache = gripper.state_cache()
+    width_m, current_ma, object_detection, age_s = cache.latest_telemetry()
 """
 
 from __future__ import annotations
 
+import threading
+import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -162,6 +166,11 @@ class GripperManager:
             debug=config.debug,
         )
         self._publisher = publisher
+        # Guards every Modbus transaction: pyrobotiqgripper isn't safe for concurrent
+        # access, and the poll thread below shares the link with RPC-issued commands.
+        self._lock = threading.Lock()
+        self._poll_thread: threading.Thread | None = None
+        self._poll_stop = threading.Event()
 
     def _publish_state(self) -> None:
         if self._publisher is None:
@@ -174,65 +183,110 @@ class GripperManager:
         except Exception:
             pass
 
+    def _poll_tick(self) -> None:
+        # Non-blocking: if a command is mid-transaction, skip this tick rather
+        # than stall it or the poller behind a lock wait.
+        if not self._lock.acquire(blocking=False):
+            return
+        try:
+            self._publish_state()
+        finally:
+            self._lock.release()
+
+    def start_polling(self, rate_hz: float) -> None:
+        """Continuously publish gripper state at `rate_hz`, independent of commands."""
+        if self._poll_thread is not None or self._publisher is None or rate_hz <= 0:
+            return
+        interval_s = 1.0 / rate_hz
+        self._poll_stop.clear()
+
+        def _run() -> None:
+            while not self._poll_stop.wait(interval_s):
+                self._poll_tick()
+
+        self._poll_thread = threading.Thread(target=_run, name="gripper-state-poller", daemon=True)
+        self._poll_thread.start()
+
+    def stop_polling(self) -> None:
+        self._poll_stop.set()
+        if self._poll_thread is not None:
+            self._poll_thread.join(timeout=1.0)
+            self._poll_thread = None
+
     def activate(self, reset: bool, start: bool, refresh_status: bool) -> None:
-        self._gripper.activate(reset=reset, start=start, refreshStatus=refresh_status)
-        self._publish_state()
+        with self._lock:
+            self._gripper.activate(reset=reset, start=start, refreshStatus=refresh_status)
+            self._publish_state()
 
     def start(self, refresh_status: bool) -> None:
-        self._gripper.start(refreshStatus=refresh_status)
-        self._publish_state()
+        with self._lock:
+            self._gripper.start(refreshStatus=refresh_status)
+            self._publish_state()
 
     def reset(self) -> None:
-        self._gripper.reset()
+        with self._lock:
+            self._gripper.reset()
 
     def stop(self) -> None:
-        self._gripper.stop()
+        with self._lock:
+            self._gripper.stop()
 
     def open(self, speed: int, force: int, wait: bool, read_status: bool, refresh_status: bool) -> None:
-        self._gripper.open(
-            speed=speed, force=force, wait=wait,
-            readStatus=read_status, refreshStatus=refresh_status,
-        )
-        self._publish_state()
+        with self._lock:
+            self._gripper.open(
+                speed=speed, force=force, wait=wait,
+                readStatus=read_status, refreshStatus=refresh_status,
+            )
+            self._publish_state()
 
     def close(self, speed: int, force: int, wait: bool, read_status: bool, refresh_status: bool) -> None:
-        self._gripper.close(
-            speed=speed, force=force, wait=wait,
-            readStatus=read_status, refreshStatus=refresh_status,
-        )
-        self._publish_state()
+        with self._lock:
+            self._gripper.close(
+                speed=speed, force=force, wait=wait,
+                readStatus=read_status, refreshStatus=refresh_status,
+            )
+            self._publish_state()
 
     def move(self, position: int, speed: int, force: int, wait: bool, read_status: bool, refresh_status: bool) -> None:
-        self._gripper.move(
-            position=position, speed=speed, force=force, wait=wait,
-            readStatus=read_status, refreshStatus=refresh_status,
-        )
-        self._publish_state()
+        with self._lock:
+            self._gripper.move(
+                position=position, speed=speed, force=force, wait=wait,
+                readStatus=read_status, refreshStatus=refresh_status,
+            )
+            self._publish_state()
 
     def move_mm(self, width_mm: float, speed: int, force: int, wait: bool, read_status: bool, refresh_status: bool) -> None:
-        self._gripper.move_mm(
-            positionmm=width_mm, speed=speed, force=force, wait=wait,
-            readStatus=read_status, refreshStatus=refresh_status,
-        )
-        self._publish_state()
+        with self._lock:
+            self._gripper.move_mm(
+                positionmm=width_mm, speed=speed, force=force, wait=wait,
+                readStatus=read_status, refreshStatus=refresh_status,
+            )
+            self._publish_state()
 
     def calibrate_mm(self, close_mm: float, open_mm: float) -> None:
-        self._gripper.calibrate_mm(closemm=close_mm, openmm=open_mm)
+        with self._lock:
+            self._gripper.calibrate_mm(closemm=close_mm, openmm=open_mm)
 
     def position(self, refresh_status: bool) -> int | None:
-        return self._gripper.position(refreshStatus=refresh_status)
+        with self._lock:
+            return self._gripper.position(refreshStatus=refresh_status)
 
     def position_mm(self, refresh_status: bool) -> float:
-        return self._gripper.position_mm(refreshStatus=refresh_status)
+        with self._lock:
+            return self._gripper.position_mm(refreshStatus=refresh_status)
 
     def status(self, refresh_status: bool) -> dict[str, Any]:
-        return dict(self._gripper.status(refreshStatus=refresh_status))
+        with self._lock:
+            return dict(self._gripper.status(refreshStatus=refresh_status))
 
     def object_detection(self, refresh_status: bool) -> int:
-        return self._gripper.objectDetection(refreshStatus=refresh_status)
+        with self._lock:
+            return self._gripper.objectDetection(refreshStatus=refresh_status)
 
     def disconnect(self) -> None:
-        self._gripper.disconnect()
+        self.stop_polling()
+        with self._lock:
+            self._gripper.disconnect()
 
 
 class ZmqGripperServer:
@@ -388,6 +442,68 @@ class _ZmqRpcClient:
         self._socket.close(linger=0)
 
 
+class GripperStateCache:
+    """Background reader that caches the most recent gripper state broadcast.
+
+    `latest()`/`latest_telemetry()` never touch the network and never block, so
+    they're safe to call from a real-time control loop; they just return
+    whatever the background thread last received (and how stale it is).
+    """
+
+    def __init__(self, subscriber: GripperStateSubscriber) -> None:
+        self._subscriber = subscriber
+        self._lock = threading.Lock()
+        self._payload: dict[str, Any] | None = None
+        self._received_monotonic: float | None = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="gripper-state-cache", daemon=True)
+        self._thread.start()
+
+    def __enter__(self) -> "GripperStateCache":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def _run(self) -> None:
+        import zmq
+
+        while not self._stop.is_set():
+            try:
+                _topic, payload = self._subscriber.recv()
+            except zmq.Again:
+                continue
+            with self._lock:
+                self._payload = payload
+                self._received_monotonic = time.monotonic()
+
+    def latest(self) -> tuple[dict[str, Any] | None, float | None]:
+        """Return (payload, age_s) for the most recent broadcast, or (None, None)."""
+        with self._lock:
+            payload = self._payload
+            received = self._received_monotonic
+        if payload is None or received is None:
+            return None, None
+        return payload, time.monotonic() - received
+
+    def latest_telemetry(
+        self,
+        max_width_m: float = DEFAULT_GRIPPER_MAX_WIDTH_M,
+    ) -> tuple[float | None, float | None, int | None, float | None]:
+        """Return (width_m, motor_current_ma, object_detection, age_s) from the last broadcast."""
+        payload, age_s = self.latest()
+        if payload is None:
+            return None, None, None, None
+        position = payload.get("position")
+        width_m = None if position is None else _position_to_width_m(position, max_width_m)
+        status = payload.get("status") or {}
+        return width_m, status.get("gCU"), status.get("gOBJ"), age_s
+
+    def close(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=1.0)
+
+
 class RobotiqGripperProxy:
     """Network proxy for pyRobotiqGripper through a ZMQ REQ/REP server."""
 
@@ -413,8 +529,12 @@ class RobotiqGripperProxy:
         self.disconnect()
 
     def state_subscriber(self, timeout_ms: int = 1000) -> GripperStateSubscriber:
-        """Return a subscriber for state broadcasts published after each command."""
+        """Return a subscriber for state broadcasts (published continuously and after each command)."""
         return GripperStateSubscriber(self.server_host, self._pub_port, timeout_ms=timeout_ms)
+
+    def state_cache(self, timeout_ms: int = 1000) -> GripperStateCache:
+        """Return a background cache of the latest state broadcast; reads never block."""
+        return GripperStateCache(self.state_subscriber(timeout_ms=timeout_ms))
 
     def disconnect(self) -> None:
         try:
@@ -567,6 +687,11 @@ def main(argv: Sequence[str] | None = None, prog: str | None = None) -> None:
     sp.add_argument("--bind-host", default=DEFAULT_BIND_HOST)
     sp.add_argument("--port", type=int, default=DEFAULT_PORT)
     sp.add_argument("--no-pub", action="store_true", help="Disable state PUB socket")
+    sp.add_argument(
+        "--publish-hz", type=float, default=30.0,
+        help="Continuously publish gripper state at this rate, in addition to publishing "
+             "after each command (0 disables polling) [30.0]",
+    )
     sp.add_argument("--com-port", default="auto")
     sp.add_argument("--device-id", type=int, default=9)
     sp.add_argument("--connection-type", default="RTU", choices=["RTU", "RTU_VIA_TCP"])
@@ -604,10 +729,14 @@ def main(argv: Sequence[str] | None = None, prog: str | None = None) -> None:
         print(f"robotiq ZMQ RPC server on {bind}", flush=True)
         manager = GripperManager(config)
         server = ZmqGripperServer(bind=bind, pub_bind=pub_bind, manager=manager)
+        if pub_bind is not None:
+            manager.start_polling(args.publish_hz)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             print("robotiq server stopped", flush=True)
+        finally:
+            manager.stop_polling()
         return
 
     with RobotiqGripperProxy(server_host=args.host, server_port=args.port) as gripper:

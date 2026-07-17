@@ -529,6 +529,19 @@ def encode_torque_stop_motion(motion: Any) -> dict[str, Any]:
     }
 
 
+def _safe_twist(robot_state: Any, attr: str) -> list[float]:
+    """Read an Optional[Twist] robot_state attribute (e.g. O_dP_EE_est) as a flat
+    [linear x/y/z, angular x/y/z] list. Twist is a structured object (.linear/.angular
+    3-vectors), not iterable itself, and franky-computed estimates may be None."""
+    try:
+        twist = getattr(robot_state, attr)
+        if twist is None:
+            return []
+        return [float(value) for value in twist.linear] + [float(value) for value in twist.angular]
+    except Exception:
+        return []
+
+
 def encode_callback_state(
     robot_state: Any,
     time_step: Any,
@@ -540,6 +553,10 @@ def encode_callback_state(
         "q": [float(value) for value in robot_state.q],
         "dq": [float(value) for value in robot_state.dq],
         "O_T_EE": [[float(value) for value in row] for row in robot_state.O_T_EE.matrix],
+        "O_F_ext_hat_K": [float(value) for value in robot_state.O_F_ext_hat_K],
+        "K_F_ext_hat_K": [float(value) for value in robot_state.K_F_ext_hat_K],
+        "tau_ext_hat_filtered": [float(value) for value in robot_state.tau_ext_hat_filtered],
+        "O_dP_EE_est": _safe_twist(robot_state, "O_dP_EE_est"),
         "time_step": float(time_step.to_sec()),
         "rel_time": float(rel_time.to_sec()),
         "abs_time": float(abs_time.to_sec()),
