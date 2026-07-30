@@ -78,10 +78,12 @@ def _franky_friction_compensation_params(franky, payload: dict[str, Any] | None)
 
 
 def _franky_cartesian_gains(franky, payload: dict[str, Any]):
+    from zero_franky.protocol import decode_damping
+
     if payload.get("stiffness") is not None:
         gains = franky.CartesianImpedanceGains()
         gains.stiffness = payload["stiffness"]
-        gains.damping = payload.get("damping")
+        gains.damping = decode_damping(payload.get("damping"))
         return gains
     translational_stiffness = payload.get("translational_stiffness")
     rotational_stiffness = payload.get("rotational_stiffness")
@@ -99,7 +101,11 @@ def _franky_cartesian_gains(franky, payload: dict[str, Any]):
 
 
 def franky_motion_kwargs(franky, kwargs: dict[str, Any] | None) -> dict[str, Any]:
-    result = dict(kwargs or {})
+    from zero_franky.protocol import is_critical_damping
+
+    # franky's trackers drop a CRITICAL gain at construction, leaving the motion
+    # to track critical damping itself.
+    result = {key: value for key, value in (kwargs or {}).items() if not is_critical_damping(value)}
     if "friction" in result and isinstance(result["friction"], dict):
         result["friction"] = _franky_friction_compensation_params(franky, result["friction"])
     if "posture_task" in result and isinstance(result["posture_task"], dict):

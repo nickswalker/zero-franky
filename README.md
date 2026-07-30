@@ -1,47 +1,24 @@
 # zero-franky
 
-Use `franky` from a non-realtime machine through a ZeroMQ protocol.
+Use [`franky`](https://github.com/TimSchneider42/franky) from another process over ZeroMQ.
 
-```mermaid
-flowchart LR
-    subgraph Client["client process"]
-        App["user code"]
-        LocalFranky["local franky construction objects"]
-        Proxy["zero-franky Robot proxy"]
-    end
+* Thin client: doesn't require libfranka, nor RT kernel, nor Python-version match with the server
+* Optional proxy for Robotiq grippers
 
-    subgraph Server["robot host process"]
-        Rpc["ZeroMQ RPC server"]
-        Builder["motion/policy builders"]
-        Session["tracker session policy loop"]
-        Handle["franky reference handle"]
-        RemoteFranky["real franky Robot"]
-        Pub["ZeroMQ state publisher"]
-    end
-
-    Robot["Franka robot"]
-
-    App --> LocalFranky
-    LocalFranky --> Proxy
-    App --> Proxy
-    Proxy -- "RPC: msgpack motion payloads" --> Rpc
-    Proxy -- "RPC: import ref or cloudpickle policy" --> Rpc
-    Rpc --> Builder
-    Builder --> RemoteFranky
-    Builder --> Session
-    Session -- "local update loop" --> Handle
-    Handle --> RemoteFranky
-    RemoteFranky <--> Robot
-    RemoteFranky --> Pub
-    Pub -- "SUB: robot.state" --> App
 ```
+ [FRANKA ARM] <----> [CONTROL BOX] <--LAN--> [RT CONTROL PC] <--ZeroMQ--> [APP COMPUTER]
+                                             franky + libfranka          your code: policy,
+                                             zero-franky server          ML, ROS, any Python
+```
+
+zero-franky was inspired by [net-franky](https://github.com/yblei/net_franky), but adopts a lower level of wrapping and command serialization to make it possible to run control loops at 500hz instead of ~5hz.
 
 ## Usage
 
 ```python
 from zero_franky import setup_zero_franky
 from zero_franky import Robot
-from franky import Affine, CartesianMotion, ReferenceType
+from zero_franky.types import Affine, CartesianMotion, ReferenceType
 
 setup_zero_franky("server-ip", 18812)
 
@@ -51,7 +28,8 @@ robot.move(motion, asynchronous=True)
 robot.join_motion()
 ```
 
-`Robot` is a proxy, and real local `franky` objects like `Affine`, `CartesianMotion`, and `JointMotion` are encoded into plain msgpack payloads. The server reconstructs corresponding real `franky` objects next to the robot.
+`Robot` is a proxy. Motions are encoded into plain msgpack payloads, and the server reconstructs real `franky` objects next to the robot. You can also pass most objects from `franky` straight into zero franky and they'll serialize the same way.
+
 
 ## Server
 
@@ -114,69 +92,44 @@ ZmqRobotServer(
 ).serve_forever()
 ```
 
-## Implemented protocol
+## Impedance Trackers
 
-- `robot.create`
-- `robot.recover_from_errors`
-- `robot.move`
-- `robot.join_motion`
-- `robot.poll_motion`
-- `robot.stop`
-- `robot.get_last_teleop_state`
-- `robot.start_joint_tracker`
-- `robot.start_cartesian_tracker`
-- `tracker.status`
-- `tracker.stop`
-- `tracker.set_joint_reference`
-- `tracker.set_cartesian_reference`
-- `tracker.set_joint_gains`
-- `tracker.set_joint_cartesian_gains`
-- `tracker.set_cartesian_gains`
-- `tracker.set_nullspace_gains`
+Franky supports client-side torque controllers (low level controllers that run in user code, not inside the Franka control box) via `JointImpedanceTrackingMotion` and `CartesianImpedanceTrackingMotion`. These are useful if you need to track trajectories or do more complex control.
 
-Supported motion payloads cover position, velocity, waypoint, stop, and fixed impedance motions.
-
-## Telemetry
-
-When the server has a `pub_bind`, `RobotManager` registers a motion callback and publishes snapshots on `robot.state`.
+Zero Franky wraps the trackers specially to reduce network round trips (avoiding `tick()` and batch requesting all robot state information). The impedance motion and reference handle stay on the robot host. Otherwise the returned proxy mirrors franky's in-process `JointImpedanceTracker` and `CartesianImpedanceTracker`, so loop bodies port over unchanged:
 
 ```python
-setup_zero_franky("server-ip", 18812)
-subscriber = robot.state_subscriber()
-topic, state = subscriber.recv()
-```
-
-## Tracker Sessions
-
-Tracker sessions are for `JointImpedanceTrackingMotion` and `CartesianImpedanceTrackingMotion`. They keep the impedance motion and reference handle on the robot host. By default, client code sets references through the returned proxy:
-
-```python
-with robot.start_joint_impedance_session(stiffness=[10.0] * 7, damping=[6.0] * 7) as session:
-    session.set_joint_reference(q, velocity=dq)
-    session.set_joint_gains(stiffness=[20.0] * 7, damping=[8.0] * 7)
+with robot.start_joint_impedance_tracker(stiffness=[10.0] * 7, damping=[6.0] * 7) as tracker:
+    tracker.set_target(q, dq=dq)
+    tracker.set_gains(stiffness=[20.0] * 7, damping=[8.0] * 7)
 ```
 
 The proxy stops the tracker when the context block exits.
 
-A session can also run a Python policy loop beside the reference handle. This avoids trying to servo over ZeroMQ while still letting client code define the policy.
+Two departures from franky's trackers, both because the loop is remote. There is no `tick()`, so drive the loop from client code at whatever rate the network allows (or hand the server a policy, below). And `is_running` / `iterations` each cost an RPC round trip.
 
-There are two policy transports:
+One addition, for the same reason: `set_target` goes over a conflating socket that may drop an update in favour of a newer one, so `tracker.last_reference` reports what the controller actually picked up. It comes from the state the server publishes each control cycle, so reading it costs no round trip — as do `current_joint_positions` and `current_pose`.
+
+If you need to run a control policy with the lowest possible latency, you'll need to transport the policy to run on the server side. There are two policy transports:
 
 - `import`: send `module` + `qualname`; the server imports the policy. Use this for stable policies installed on the robot host.
-- `cloudpickle`: serialize the function and send it over RPC. Use this for exploratory work on a trusted control network.
+- `cloudpickle`: serialize the function and send it over RPC. 
 
-The built-in hold policies are importable:
+### Imported Policies
+
+Here's an example default "policy" that simply holds the current joint configuration with a certain stiffness.
 
 ```python
 from zero_franky.tracker_policies import hold_current_joint
 
-with robot.start_joint_impedance_session(
+with robot.start_joint_impedance_tracker(
     hold_current_joint,
-    stiffness=[10.0] * 7,
-    damping=[6.0] * 7,
-) as session:
-    status = session.status()
+    stiffness=[10.0] * 7
+) as tracker:
+    status = tracker.status()
 ```
+
+### Pickled Policies
 
 Or it can be shipped with `cloudpickle` for exploratory work:
 
@@ -204,28 +157,13 @@ def wiggle_joints(context):
 
     return step
 
-with robot.start_joint_impedance_session(
+with robot.start_joint_impedance_tracker(
     wiggle_joints,
     policy_transport="cloudpickle",
     stiffness=[10.0] * 7,
-) as session:
-    status = session.status()
+) as tracker:
+    status = tracker.status()
 ```
 
-`cloudpickle` policy transport executes client-provided Python on the robot host. Use it only on a trusted control network.
 
-Cartesian sessions use the same policy shape and return an `Affine` target:
-
-```python
-from zero_franky.tracker_policies import hold_current_cartesian
-
-with robot.start_cartesian_impedance_session(
-    hold_current_cartesian,
-    translational_stiffness=250.0,
-    rotational_stiffness=25.0,
-) as session:
-    session.set_cartesian_gains(translational_stiffness=300.0, rotational_stiffness=30.0)
-    status = session.status()
-```
-
-The policy function receives a context with `franky`, `robot`, `elapsed`, `iterations`, and `stop()`. A factory may return a step function, or the policy may act directly as the step function. Joint steps return `{"position": q, "velocity": dq, "torque_feedforward": tau}`. Cartesian steps return `{"target": affine, "target_twist": twist}`.
+The policy function receives a context with `franky`, `robot`, `elapsed`, `iterations`, `stop()`, and `tracker`, a handle onto its own tracker carrying franky's `set_target`/`set_gains`. A factory may return a step function, or the policy may act directly as the step function. Joint steps return `{"position": q, "velocity": dq, "torque_feedforward": tau}`. Cartesian steps return `{"target": affine, "target_twist": twist}`.

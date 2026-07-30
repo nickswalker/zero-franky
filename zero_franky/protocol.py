@@ -29,6 +29,29 @@ def format_exception(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
+#: Wire spelling of `franky.CRITICAL`: unpin damping. Distinct from a null
+#: damping, which means the caller did not name damping at all.
+CRITICAL_DAMPING = "critical"
+
+
+def is_critical_damping(value: Any) -> bool:
+    """Whether a wire value is the unpin sentinel."""
+    return isinstance(value, str) and value == CRITICAL_DAMPING
+
+
+def decode_damping(value: Any) -> Any:
+    """Resolve a wire damping for franky's gains objects.
+
+    The sentinel and a null damping both mean unpinned; they differ only in
+    whether the call acts at all, which the caller settles first.
+    """
+    if isinstance(value, str):
+        if not is_critical_damping(value):
+            raise ProtocolError(f"Unknown damping sentinel: {value!r}")
+        return None
+    return value
+
+
 MOTION_ENCODERS = {}
 
 
@@ -165,6 +188,10 @@ def encode_rpc_value(value: Any) -> Any:
     item = getattr(value, "item", None)
     if callable(item):
         return encode_rpc_value(item())
+    # franky's CRITICAL, matched by type name so the client stays importable
+    # without franky.
+    if type(value).__name__ == "_CriticalDamping":
+        return CRITICAL_DAMPING
     if type(value).__name__ == "FrictionCompensationParams":
         return encode_friction_compensation_params(value)
     if type(value).__name__ == "CartesianImpedanceGains":
@@ -540,6 +567,41 @@ def _safe_twist(robot_state: Any, attr: str) -> list[float]:
         return [float(value) for value in twist.linear] + [float(value) for value in twist.angular]
     except Exception:
         return []
+
+
+def encode_motion_reference(motion: Any) -> dict[str, Any] | None:
+    """Encode the reference a tracking motion last picked up, or None if unset.
+
+    Rides the state stream: the reference socket is CONFLATE, so this is how a
+    client tells which update the controller took.
+    """
+    get_reference = getattr(motion, "get_reference", None)
+    if callable(get_reference):
+        reference = get_reference()
+        if reference is None:
+            return None
+        if hasattr(reference, "q"):
+            return {
+                "type": "JointReference",
+                "q": encode_vector(reference.q),
+                "dq": encode_vector(reference.dq),
+                "tau_ff": encode_vector(reference.tau_ff),
+            }
+        target_twist = getattr(reference, "target_twist", None)
+        target_acceleration = getattr(reference, "target_acceleration", None)
+        return {
+            "type": "CartesianReference",
+            "target": encode_affine(reference.target),
+            "target_twist": None if target_twist is None else encode_twist(target_twist),
+            "target_acceleration": (
+                None if target_acceleration is None else encode_twist_acceleration(target_acceleration)
+            ),
+        }
+    # SimpleTorqueMotion has no reference; its commanded torque is the analogue.
+    get_torque = getattr(motion, "get_torque", None)
+    if callable(get_torque):
+        return {"type": "Torque", "tau": encode_vector(get_torque())}
+    return None
 
 
 def encode_callback_state(

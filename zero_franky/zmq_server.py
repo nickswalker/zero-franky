@@ -12,6 +12,13 @@ from zero_franky.protocol import format_exception
 
 RPC_HANDLERS = {}
 
+#: Cap on how long server shutdown waits for each tracker's stop ramp [s].
+SHUTDOWN_JOIN_TIMEOUT = 5.0
+
+#: How many stopped sessions keep a readable final status. Bounded because a
+#: long-lived server starts unboundedly many trackers.
+FINISHED_STATUS_HISTORY = 32
+
 
 def rpc_handler(method: str):
     def register(fn):
@@ -30,6 +37,7 @@ class RobotManager:
         self._robots: dict[str, Any] = {}
         self._latest_state: dict[str, dict[str, Any]] = {}
         self._tracker_sessions: dict[str, Any] = {}
+        self._finished_statuses: dict[str, dict[str, Any]] = {}
 
     def create_robot(self, fci_hostname: str, kwargs: dict[str, Any] | None = None) -> str:
         robot_id = uuid.uuid4().hex
@@ -121,13 +129,70 @@ class RobotManager:
         self._tracker_sessions[session.id] = session
         return session.start()
 
-    def tracker_status(self, session_id: str):
-        return self._tracker_session(session_id).status()
+    def start_torque_tracker(self, robot_id: str, motion_kwargs: dict[str, Any] | None = None) -> str:
+        from zero_franky.tracker_session import TrackerSession
+        from zero_franky.zmq_server_franky import franky_motion_kwargs
 
-    def stop_tracker(self, session_id: str, join_timeout: float | None = 1.0):
-        self._tracker_session(session_id).stop(join_timeout)
-        self._tracker_sessions.pop(session_id, None)
+        robot = self._robot(robot_id)
+        motion = self._franky.SimpleTorqueMotion(**franky_motion_kwargs(self._franky, motion_kwargs))
+        self._register_state_callback(robot_id, motion)
+        robot.move(motion, asynchronous=True)
+        session = TrackerSession(
+            franky=self._franky,
+            robot=robot,
+            kind="torque",
+            policy_factory=None,
+            motion=motion,
+        )
+        self._tracker_sessions[session.id] = session
+        return session.start()
+
+    def tracker_status(self, session_id: str):
+        session = self._tracker_sessions.get(session_id)
+        if session is not None:
+            return session.status()
+        try:
+            return self._finished_statuses[session_id]
+        except KeyError as exc:
+            raise KeyError(f"Unknown tracker session id: {session_id}") from exc
+
+    def stop_tracker(
+        self,
+        session_id: str,
+        join_timeout: float | None = None,
+        stop_motion_payload: dict[str, Any] | None = None,
+    ):
+        """Stop a tracker session, tolerating a session that is already gone.
+
+        Deregistered before stopping so that repeated stops are harmless, the way
+        franky's tracker `stop()` is: the context manager calls it on exit even if
+        the caller already stopped explicitly. A stop that raises therefore leaves
+        no session behind to retry, which is deliberate — the exception reaches the
+        client instead of being stranded on a half-stopped session.
+        """
+        session = self._tracker_sessions.pop(session_id, None)
+        if session is None:
+            return True
+        stop_motion = None
+        if stop_motion_payload is not None:
+            from zero_franky.zmq_server_franky import build_franky_motion
+
+            stop_motion = build_franky_motion(self._franky, stop_motion_payload)
+        try:
+            session.stop(join_timeout, stop_motion)
+        finally:
+            self._remember_finished(session)
         return True
+
+    def _remember_finished(self, session) -> None:
+        """Keep a stopped session's final status readable after deregistration.
+
+        So `is_running` answers False after a stop, as franky's does, rather than
+        raising `Unknown tracker session id`.
+        """
+        self._finished_statuses[session.id] = session.status()
+        while len(self._finished_statuses) > FINISHED_STATUS_HISTORY:
+            self._finished_statuses.pop(next(iter(self._finished_statuses)))
 
     def set_joint_tracker_reference(
         self,
@@ -158,22 +223,21 @@ class RobotManager:
         self._tracker_session(session_id).set_cartesian_reference(target, target_twist, target_acceleration)
         return True
 
-    def set_joint_tracker_gains(self, session_id: str, stiffness: list[float], damping: list[float]):
+    def set_joint_tracker_gains(self, session_id: str, stiffness: list[float], damping: list[float] | None):
         self._tracker_session(session_id).set_joint_gains(stiffness, damping)
         return True
 
     def set_cartesian_tracker_gains(self, session_id: str, gains_payload: dict[str, Any]):
-        from zero_franky.zmq_server_franky import _franky_cartesian_gains
-
-        gains = _franky_cartesian_gains(self._franky, gains_payload)
-        self._tracker_session(session_id).set_cartesian_gains(gains)
+        # Forwarded unresolved: the session merges it into the motion's current gains.
+        self._tracker_session(session_id).set_cartesian_gains(gains_payload)
         return True
 
     def set_joint_tracker_cartesian_gains(self, session_id: str, gains_payload: dict[str, Any]):
-        from zero_franky.zmq_server_franky import _franky_cartesian_gains
+        self._tracker_session(session_id).set_hybrid_cartesian_gains(gains_payload)
+        return True
 
-        gains = _franky_cartesian_gains(self._franky, gains_payload)
-        self._tracker_session(session_id).set_hybrid_cartesian_gains(gains)
+    def set_tracker_posture_stiffness(self, session_id: str, posture_stiffness: Any):
+        self._tracker_session(session_id).set_posture_stiffness(posture_stiffness)
         return True
 
     def set_cartesian_tracker_nullspace_gains(self, session_id: str, gains_payload: dict[str, Any]):
@@ -183,6 +247,15 @@ class RobotManager:
         self._tracker_session(session_id).set_nullspace_gains(gains)
         return True
 
+    def set_session_torque(self, session_id: str, torque: list[float]):
+        self._tracker_session(session_id).set_torque(torque)
+        return True
+
+    def get_session_torque(self, session_id: str):
+        from zero_franky.protocol import encode_rpc_value
+
+        return encode_rpc_value(self._tracker_session(session_id).get_torque())
+
     def _tracker_session(self, session_id: str):
         try:
             return self._tracker_sessions[session_id]
@@ -190,9 +263,11 @@ class RobotManager:
             raise KeyError(f"Unknown tracker session id: {session_id}") from exc
 
     def shutdown(self) -> None:
+        # Bounded, unlike an ordinary stop: shutdown must make progress even if a
+        # ramp never completes, so it does not inherit the blocking join.
         for session_id in list(self._tracker_sessions):
             try:
-                self.stop_tracker(session_id)
+                self.stop_tracker(session_id, SHUTDOWN_JOIN_TIMEOUT)
             except Exception:
                 pass
         for robot_id in list(self._robots):
@@ -222,11 +297,13 @@ class RobotManager:
         if not hasattr(motion, "register_callback"):
             return
 
-        from zero_franky.protocol import encode_callback_state
+        from zero_franky.protocol import encode_callback_state, encode_motion_reference
 
         def callback(robot_state, time_step, rel_time, abs_time, control_signal):
             payload = encode_callback_state(robot_state, time_step, rel_time, abs_time, control_signal)
             payload["robot_id"] = robot_id
+            # Wait-free on the motion's side, so safe on the control thread.
+            payload["reference"] = encode_motion_reference(motion)
             self._latest_state[robot_id] = payload
             if self._state_publisher is not None:
                 self._state_publisher.publish("robot.state", payload)
@@ -278,6 +355,8 @@ class _TrackerUpdateListener:
                             msg.get("target_twist"),
                             msg.get("target_acceleration"),
                         )
+                    elif kind == "torque":
+                        self._manager.set_session_torque(session_id, msg["torque"])
                 except Exception:
                     pass
         finally:
@@ -411,6 +490,11 @@ def handle_robot_start_cartesian_tracker(manager: RobotManager, params: dict[str
     )
 
 
+@rpc_handler("robot.start_torque_tracker")
+def handle_robot_start_torque_tracker(manager: RobotManager, params: dict[str, Any]):
+    return manager.start_torque_tracker(params["robot_id"], params.get("motion_kwargs"))
+
+
 @rpc_handler("tracker.status")
 def handle_tracker_status(manager: RobotManager, params: dict[str, Any]):
     return manager.tracker_status(params["session_id"])
@@ -418,7 +502,11 @@ def handle_tracker_status(manager: RobotManager, params: dict[str, Any]):
 
 @rpc_handler("tracker.stop")
 def handle_tracker_stop(manager: RobotManager, params: dict[str, Any]):
-    return manager.stop_tracker(params["session_id"], params.get("join_timeout", 1.0))
+    return manager.stop_tracker(
+        params["session_id"],
+        params.get("join_timeout"),
+        params.get("stop_motion"),
+    )
 
 
 @rpc_handler("tracker.set_joint_reference")
@@ -456,6 +544,21 @@ def handle_tracker_set_joint_cartesian_gains(manager: RobotManager, params: dict
     return manager.set_joint_tracker_cartesian_gains(params["session_id"], params["gains"])
 
 
+@rpc_handler("tracker.set_posture_stiffness")
+def handle_tracker_set_posture_stiffness(manager: RobotManager, params: dict[str, Any]):
+    return manager.set_tracker_posture_stiffness(params["session_id"], params["posture_stiffness"])
+
+
 @rpc_handler("tracker.set_nullspace_gains")
 def handle_tracker_set_nullspace_gains(manager: RobotManager, params: dict[str, Any]):
     return manager.set_cartesian_tracker_nullspace_gains(params["session_id"], params["gains"])
+
+
+@rpc_handler("tracker.set_torque")
+def handle_tracker_set_torque(manager: RobotManager, params: dict[str, Any]):
+    return manager.set_session_torque(params["session_id"], params["torque"])
+
+
+@rpc_handler("tracker.get_torque")
+def handle_tracker_get_torque(manager: RobotManager, params: dict[str, Any]):
+    return manager.get_session_torque(params["session_id"])
