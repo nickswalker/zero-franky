@@ -35,7 +35,7 @@ def _build_server_parser() -> argparse.ArgumentParser:
     parser.add_argument("--robotiq", action="store_true", help="Also run the Robotiq gripper server")
     robotiq_args = parser.add_argument_group("--robotiq options")
     robotiq_args.add_argument("--gripper-port", type=int, default=GRIPPER_DEFAULT_PORT)
-    robotiq_args.add_argument("--gripper-publish-hz", type=float, default=30.0)
+    robotiq_args.add_argument("--gripper-publish-hz", type=float, default=5.0)
     robotiq_args.add_argument("--com-port", default="auto")
     robotiq_args.add_argument("--device-id", type=int, default=9)
     robotiq_args.add_argument("--connection-type", default="RTU", choices=["RTU", "RTU_VIA_TCP"])
