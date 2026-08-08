@@ -284,6 +284,11 @@ class GripperManager:
             return self._gripper.objectDetection(refreshStatus=refresh_status)
 
     def disconnect(self) -> None:
+        """Shut the gripper link down.
+
+        Stops the state poller and closes the Modbus link, so calling this
+        while other clients are connected leaves them with no state stream.
+        """
         self.stop_polling()
         with self._lock:
             self._gripper.disconnect()
@@ -395,7 +400,11 @@ def _h_object_detection(m: GripperManager, p: dict) -> int:
 
 @rpc_handler("gripper.disconnect")
 def _h_disconnect(m: GripperManager, p: dict) -> None:
-    m.disconnect()
+    """Acknowledge a client going away.
+
+    Deliberately does nothing. Perhaps in the future we could refcount
+    subscribers and stop polling if no one is listening
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -537,6 +546,7 @@ class RobotiqGripperProxy:
         return GripperStateCache(self.state_subscriber(timeout_ms=timeout_ms))
 
     def disconnect(self) -> None:
+        """Close this client's socket. Leaves the server and its state stream up."""
         try:
             self._client.call("gripper.disconnect")
         finally:
@@ -736,7 +746,7 @@ def main(argv: Sequence[str] | None = None, prog: str | None = None) -> None:
         except KeyboardInterrupt:
             print("robotiq server stopped", flush=True)
         finally:
-            manager.stop_polling()
+            manager.disconnect()
         return
 
     with RobotiqGripperProxy(server_host=args.host, server_port=args.port) as gripper:
