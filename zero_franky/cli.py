@@ -56,8 +56,6 @@ def gripper_command(args: argparse.Namespace) -> list[str]:
         "--tcp-port", str(args.tcp_port),
         "--publish-hz", str(args.gripper_publish_hz),
     ]
-    if args.no_pub:
-        command.append("--no-pub")
     return command
 
 

@@ -216,6 +216,24 @@ def encode_rpc_value(value: Any) -> Any:
             "damping": float(value.damping),
             "max_torque": None if value.max_torque is None else float(value.max_torque),
         }
+    if type(value).__name__ == "JointReference":
+        return {
+            "type": "JointReference",
+            "q": encode_vector(value.q),
+            "dq": encode_vector(value.dq),
+            "tau_ff": encode_vector(value.tau_ff),
+        }
+    if type(value).__name__ == "CartesianReference":
+        target_twist = getattr(value, "target_twist", None)
+        target_acceleration = getattr(value, "target_acceleration", None)
+        return {
+            "type": "CartesianReference",
+            "target": encode_affine(value.target),
+            "target_twist": None if target_twist is None else encode_twist(target_twist),
+            "target_acceleration": (
+                None if target_acceleration is None else encode_twist_acceleration(target_acceleration)
+            ),
+        }
     return value
 
 

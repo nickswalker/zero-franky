@@ -74,7 +74,7 @@ class RobotManager:
         robot_id: str,
         policy_payload: dict[str, Any] | None = None,
         motion_kwargs: dict[str, Any] | None = None,
-        period: float = 0.001,
+        period: float | None = 0.001,
         stop_on_policy_error: bool = True,
     ) -> str:
         from zero_franky.tracker_session import TrackerSession, load_policy
@@ -105,7 +105,7 @@ class RobotManager:
         robot_id: str,
         policy_payload: dict[str, Any] | None = None,
         motion_kwargs: dict[str, Any] | None = None,
-        period: float = 0.001,
+        period: float | None = 0.001,
         stop_on_policy_error: bool = True,
     ) -> str:
         from zero_franky.tracker_session import TrackerSession, load_policy
@@ -299,9 +299,12 @@ class RobotManager:
 
         from zero_franky.protocol import encode_callback_state, encode_motion_reference
 
+        robot = self._robot(robot_id)
+
         def callback(robot_state, time_step, rel_time, abs_time, control_signal):
             payload = encode_callback_state(robot_state, time_step, rel_time, abs_time, control_signal)
             payload["robot_id"] = robot_id
+            payload["in_control"] = bool(getattr(robot, "is_in_control", True))
             # Wait-free on the motion's side, so safe on the control thread.
             payload["reference"] = encode_motion_reference(motion)
             self._latest_state[robot_id] = payload

@@ -1,3 +1,6 @@
+"""
+Tracker sessions are server-side objects managing impedance tracking motions.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,6 +12,9 @@ from typing import Any, Callable
 import uuid
 
 from zero_franky.protocol import decode_damping, encode_rpc_value
+
+#: Floor for the timestep reported by policy steps.
+_MIN_DT = 1e-9
 
 
 class TrackerPolicyError(RuntimeError):
@@ -108,7 +114,7 @@ class TrackerSession:
         kind: str,
         policy_factory: Callable[[Any], Any] | None,
         motion: Any,
-        period: float = 0.001,
+        period: float | None = 0.001,
         stop_on_policy_error: bool = True,
     ):
         self.id = uuid.uuid4().hex
@@ -124,6 +130,8 @@ class TrackerSession:
         self._thread: threading.Thread | None = None
         self._iterations = 0
         self._error: str | None = None
+        self._started_at = time.monotonic()
+        self._dt = 0.0
 
     def start(self) -> str:
         if self._policy_factory is None:
@@ -265,10 +273,9 @@ class TrackerSession:
         """Apply a Cartesian gains payload on top of the motion's current gains.
 
         A payload carrying `stiffness` is a full encoded `CartesianImpedanceGains`
-        and total-replaces, so the current gains are never read. Otherwise only the
+        and total-replaces. Otherwise only the
         named 3x3 stiffness blocks are overwritten, leaving anisotropy and the
-        unnamed block intact; rebuilding from the payload alone would silently
-        substitute franky's 500/50 defaults.
+        unnamed block intact.
 
         A payload naming nothing returns None, the no-op; an explicit unpin names
         damping with the sentinel.
@@ -343,15 +350,29 @@ class TrackerSession:
                 policy = self._policy_factory
 
             next_time = time.monotonic()
+            t_last = next_time
             # `_in_control` is this loop's `tick()`: end when the controller does,
             # rather than streaming references into a faulted motion.
             while not self._stop_event.is_set() and self._in_control:
                 now = time.monotonic()
+                if self._iterations == 0:
+                    # No previous step to measure against, so report the cycle
+                    # about to run, as franky's first `tick()` does.
+                    dt = self._period if self._period is not None else _MIN_DT
+                else:
+                    dt = max(now - t_last, _MIN_DT)
+                t_last = now
+                self._dt = dt
+                ctx.dt = dt
                 ctx.elapsed = now - ctx.started_at
                 ctx.iterations = self._iterations
                 reference = policy(ctx)
                 self._apply_reference(reference)
                 self._iterations += 1
+
+                if self._period is None:
+                    # Unpaced: run the policy as fast as the loop allows.
+                    continue
 
                 next_time += self._period
                 sleep_time = next_time - time.monotonic()
@@ -422,6 +443,26 @@ class _TrackerHandle:
 
     def status(self) -> dict[str, Any]:
         return self._session.status()
+
+    @property
+    def period(self) -> float | None:
+        """The configured loop period in seconds, or None if the tracker is unpaced."""
+        return self._session._period
+
+    @property
+    def dt(self) -> float:
+        """The timestep most recently returned by tick (0.0 before first step)."""
+        return self._session._dt
+
+    @property
+    def tick_count(self) -> int:
+        """Number of ticks that have run."""
+        return self._session._iterations
+
+    @property
+    def elapsed_time(self) -> float:
+        """Seconds since this tracker was created."""
+        return time.monotonic() - self._session._started_at
 
     def request_stop(self) -> None:
         """Start the stop ramp and end the policy loop, without waiting."""
@@ -514,8 +555,14 @@ class _TrackerContext(SimpleNamespace):
             started_at=time.monotonic(),
             elapsed=0.0,
             iterations=0,
+            dt=0.0,
         )
         self._stop_event = stop_event
+
+    @property
+    def period(self) -> float | None:
+        """The configured loop period in seconds, or None if unpaced."""
+        return self.tracker.period if self.tracker is not None else None
 
     @property
     def elapsed_time(self) -> float:

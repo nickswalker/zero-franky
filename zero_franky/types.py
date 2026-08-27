@@ -18,12 +18,6 @@ those instead and the same encoders handle them. The two produce identical wire
 payloads, which `tests/test_types_parity.py` asserts wherever franky is
 importable.
 
-Scope: position, velocity, waypoint, and stop motions. The impedance motions
-(`JointImpedanceMotion`, `CartesianImpedanceMotion`, `TorqueStopMotion`) are not
-covered here — they carry large parameter and safety bags whose defaults would
-have to be duplicated from franky. Torque control over zero-franky normally goes
-through the impedance trackers instead (`Robot.start_joint_impedance_tracker`),
-which take plain lists of floats and need none of these types.
 """
 
 from __future__ import annotations
@@ -33,8 +27,11 @@ from enum import Enum
 from typing import Any, Iterable, Sequence
 
 __all__ = [
+    "CRITICAL",
     "Affine",
+    "CartesianImpedanceGains",
     "CartesianMotion",
+    "CartesianReference",
     "CartesianState",
     "CartesianStopMotion",
     "CartesianVelocityMotion",
@@ -44,7 +41,10 @@ __all__ = [
     "CartesianWaypoint",
     "CartesianWaypointMotion",
     "Duration",
+    "FrictionCompensationParams",
+    "JointImpedanceGains",
     "JointMotion",
+    "JointReference",
     "JointState",
     "JointStopMotion",
     "JointVelocityMotion",
@@ -53,6 +53,9 @@ __all__ = [
     "JointVelocityWaypointMotion",
     "JointWaypoint",
     "JointWaypointMotion",
+    "ManipulabilityTask",
+    "NullspaceGains",
+    "PostureTask",
     "ReferenceType",
     "RelativeDynamicsFactor",
     "RobotPose",
@@ -373,13 +376,14 @@ class CartesianState:
 
 
 class JointState:
-    """A joint-space target: seven joint positions [rad]."""
+    """A joint-space target: seven joint positions [rad] and optional velocities [rad/s]."""
 
-    def __init__(self, position: Sequence[float]):
+    def __init__(self, position: Sequence[float], velocity: Sequence[float] | None = None):
         self.position = _vector(position, 7, "position")
+        self.velocity = (0.0,) * 7 if velocity is None else _vector(velocity, 7, "velocity")
 
     def __repr__(self) -> str:
-        return f"JointState({list(self.position)})"
+        return f"JointState({list(self.position)}, {list(self.velocity)})"
 
 
 def _as_cartesian_state(target: Any) -> CartesianState:
@@ -657,3 +661,272 @@ class JointVelocityStopMotion:
 
     def __init__(self, relative_dynamics_factor: Any = 1.0):
         self.relative_dynamics_factor = relative_dynamics_factor
+
+
+class _CriticalDamping:
+    """Sentinel type for :data:`CRITICAL`."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "franky.CRITICAL"
+
+
+CRITICAL = _CriticalDamping()
+
+
+class PostureTask:
+    """Joint-posture objective projected into the Cartesian nullspace."""
+
+    def __init__(
+        self,
+        target: Sequence[float],
+        stiffness: float | Sequence[float],
+        damping: float | Sequence[float] | None = None,
+        max_torque: float | None = None,
+    ):
+        self.target = _vector(target, 7, "target")
+        if isinstance(stiffness, (int, float)):
+            self.stiffness: tuple[float, ...] = (float(stiffness),) * 7
+        else:
+            self.stiffness = _vector(stiffness, 7, "stiffness")
+        if damping is None:
+            self.damping: tuple[float, ...] | None = None
+        elif isinstance(damping, (int, float)):
+            self.damping = (float(damping),) * 7
+        else:
+            self.damping = _vector(damping, 7, "damping")
+        self.max_torque: float | None = None if max_torque is None else float(max_torque)
+
+    def __repr__(self) -> str:
+        return (
+            f"PostureTask(target={list(self.target)}, stiffness={list(self.stiffness)}, "
+            f"damping={list(self.damping) if self.damping is not None else None}, "
+            f"max_torque={self.max_torque})"
+        )
+
+
+class ManipulabilityTask:
+    """Manipulability maximization objective projected into the Cartesian nullspace."""
+
+    def __init__(
+        self,
+        gain: float,
+        damping: float = 0.0,
+        max_torque: float | None = None,
+    ):
+        self.gain = float(gain)
+        self.damping = float(damping)
+        self.max_torque = None if max_torque is None else float(max_torque)
+
+    def __repr__(self) -> str:
+        return f"ManipulabilityTask(gain={self.gain}, damping={self.damping}, max_torque={self.max_torque})"
+
+
+class NullspaceGains:
+    """Runtime-adjustable gains for a nullspace task."""
+
+    def __init__(self):
+        # franky's binding is `py::init<>()`: the gains are default-constructed
+        # and then assigned. Taking constructor keywords here would let client
+        # code compile against the stand-in and fail against franky.
+        self._posture_stiffness: tuple[float, ...] = (0.0,) * 7
+        self._posture_damping: tuple[float, ...] | None = None
+        self.posture_max_torque: float | None = None
+        self.manipulability_gain = 0.0
+        self.manipulability_damping = 0.0
+        self.manipulability_max_torque: float | None = None
+
+    @property
+    def posture_stiffness(self) -> tuple[float, ...]:
+        return self._posture_stiffness
+
+    @posture_stiffness.setter
+    def posture_stiffness(self, value: float | Sequence[float]):
+        if isinstance(value, (int, float)):
+            self._posture_stiffness = (float(value),) * 7
+        else:
+            self._posture_stiffness = _vector(value, 7, "posture_stiffness")
+
+    @property
+    def posture_damping(self) -> tuple[float, ...] | None:
+        return self._posture_damping
+
+    @posture_damping.setter
+    def posture_damping(self, value: float | Sequence[float] | None):
+        if value is None:
+            self._posture_damping = None
+        elif isinstance(value, (int, float)):
+            self._posture_damping = (float(value),) * 7
+        else:
+            self._posture_damping = _vector(value, 7, "posture_damping")
+
+    def __repr__(self) -> str:
+        return (
+            f"NullspaceGains(posture_stiffness={list(self.posture_stiffness)}, "
+            f"posture_damping={list(self.posture_damping) if self.posture_damping is not None else None}, "
+            f"posture_max_torque={self.posture_max_torque}, "
+            f"manipulability_gain={self.manipulability_gain}, "
+            f"manipulability_damping={self.manipulability_damping}, "
+            f"manipulability_max_torque={self.manipulability_max_torque})"
+        )
+
+
+class CartesianImpedanceGains:
+    """Runtime-adjustable stiffness and damping gains for Cartesian impedance motions."""
+
+    def __init__(
+        self,
+        translational_stiffness: float = 500.0,
+        rotational_stiffness: float = 50.0,
+    ):
+        kt = float(translational_stiffness)
+        kr = float(rotational_stiffness)
+        self.stiffness: list[list[float]] = [
+            [kt, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, kt, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, kt, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, kr, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, kr, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0, kr],
+        ]
+        self.damping: list[list[float]] | None = None
+
+    @classmethod
+    def isotropic(
+        cls,
+        translational_stiffness: float,
+        rotational_stiffness: float,
+        translational_damping: float | None = None,
+        rotational_damping: float | None = None,
+    ) -> "CartesianImpedanceGains":
+        kt = float(translational_stiffness)
+        kr = float(rotational_stiffness)
+        inst = cls(kt, kr)
+        # Passing one damping component leaves the other critically damped, as
+        # franky's `value_or(2 * sqrt(stiffness))` does. Filling it with zero
+        # instead would silently leave a stiff axis undamped.
+        if translational_damping is not None or rotational_damping is not None:
+            dt = 2.0 * math.sqrt(kt) if translational_damping is None else float(translational_damping)
+            dr = 2.0 * math.sqrt(kr) if rotational_damping is None else float(rotational_damping)
+            inst.damping = [
+                [dt, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, dt, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, dt, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, dr, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0, dr, 0.0],
+                [0.0, 0.0, 0.0, 0.0, 0.0, dr],
+            ]
+        return inst
+
+    @classmethod
+    def diagonal(
+        cls,
+        stiffness: Sequence[float],
+        damping: Sequence[float] | None = None,
+    ) -> "CartesianImpedanceGains":
+        k = _vector(stiffness, 6, "stiffness")
+        inst = cls(500.0, 50.0)
+        inst.stiffness = [
+            [k[i] if i == j else 0.0 for j in range(6)]
+            for i in range(6)
+        ]
+        if damping is not None:
+            d = _vector(damping, 6, "damping")
+            inst.damping = [
+                [d[i] if i == j else 0.0 for j in range(6)]
+                for i in range(6)
+            ]
+        return inst
+
+    def __repr__(self) -> str:
+        return f"CartesianImpedanceGains(stiffness={self.stiffness}, damping={self.damping})"
+
+
+class JointImpedanceGains:
+    """Runtime-adjustable stiffness and damping gains for joint impedance motions."""
+
+    def __init__(
+        self,
+        stiffness: Sequence[float] | None = None,
+        damping: Sequence[float] | None = None,
+    ):
+        self.stiffness: tuple[float, ...] = (
+            (50.0,) * 7 if stiffness is None else _vector(stiffness, 7, "stiffness")
+        )
+        self.damping: tuple[float, ...] | None = (
+            None if damping is None else _vector(damping, 7, "damping")
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"JointImpedanceGains(stiffness={list(self.stiffness)}, "
+            f"damping={list(self.damping) if self.damping is not None else None})"
+        )
+
+
+class FrictionCompensationParams:
+    """Per-joint friction feedforward settings for torque-control motions."""
+
+    def __init__(
+        self,
+        coulomb: Sequence[float] = (0.0,) * 7,
+        viscous: Sequence[float] = (0.0,) * 7,
+        max_torque: Sequence[float] = (1.0,) * 7,
+        velocity_epsilon: float = 0.03,
+    ):
+        self.coulomb = _vector(coulomb, 7, "coulomb")
+        self.viscous = _vector(viscous, 7, "viscous")
+        self.max_torque = _vector(max_torque, 7, "max_torque")
+        self.velocity_epsilon = float(velocity_epsilon)
+
+    def __repr__(self) -> str:
+        return (
+            f"FrictionCompensationParams(coulomb={list(self.coulomb)}, "
+            f"viscous={list(self.viscous)}, max_torque={list(self.max_torque)}, "
+            f"velocity_epsilon={self.velocity_epsilon})"
+        )
+
+
+class JointReference:
+    """A commanded joint reference for tracking motions.
+
+    Unset components default to zero, as franky's do: a reference carrying only
+    `q` still commands zero velocity and zero feedforward torque.
+    """
+
+    def __init__(
+        self,
+        q: Sequence[float] | None = None,
+        dq: Sequence[float] | None = None,
+        tau_ff: Sequence[float] | None = None,
+    ):
+        self.q = (0.0,) * 7 if q is None else _vector(q, 7, "q")
+        self.dq = (0.0,) * 7 if dq is None else _vector(dq, 7, "dq")
+        self.tau_ff = (0.0,) * 7 if tau_ff is None else _vector(tau_ff, 7, "tau_ff")
+
+    def __repr__(self) -> str:
+        return (
+            f"JointReference(q={list(self.q)}, dq={list(self.dq)}, "
+            f"tau_ff={list(self.tau_ff)})"
+        )
+
+
+class CartesianReference:
+    """A commanded Cartesian reference for tracking motions."""
+
+    def __init__(
+        self,
+        target: Any = None,
+        target_twist: Any = None,
+        target_acceleration: Any = None,
+    ):
+        self.target = Affine() if target is None else target
+        self.target_twist = target_twist
+        self.target_acceleration = target_acceleration
+
+    def __repr__(self) -> str:
+        return (
+            f"CartesianReference(target={self.target!r}, target_twist={self.target_twist!r}, "
+            f"target_acceleration={self.target_acceleration!r})"
+        )

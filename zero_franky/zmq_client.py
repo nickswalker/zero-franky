@@ -17,7 +17,14 @@ from zero_franky.protocol import (
     encode_rpc_value,
     encode_twist_acceleration,
 )
-from zero_franky.types import Affine, RobotPose, Twist, TwistAcceleration
+from zero_franky.types import Affine, JointState, RobotPose, Twist, TwistAcceleration
+
+#: Floor for the timestep reported by `tick()`.
+_MIN_DT = 1e-9
+
+#: How often `tick()` falls back to an RPC while the state stream has yet to
+#: confirm that the controller is in control.
+_PROBE_INTERVAL = 1.0
 
 
 def encode_policy(policy, transport: str = "import") -> dict[str, Any]:
@@ -64,19 +71,38 @@ class _TrackerProxy:
 
     Mirrors the surface of `franky`'s in-process tracker classes, so loop bodies
     written against `franky.JointImpedanceTracker` port over unchanged. The
-    differences are inherent to running over the network: there is no `tick()`
-    (see `period` and the server-side policy loop instead), and `motion` cannot
-    be handed back because it lives in the server process.
+    differences are inherent to running over the network: `tick()` learns that
+    the controller stopped from the state stream rather than from the robot
+    directly (see its docstring), and `motion` cannot be handed back because it
+    lives in the server process.
     """
 
     _kind: str
 
-    def __init__(self, client: "ZmqRpcClient", session_id: str, *, push_socket=None, robot=None):
+    def __init__(
+        self,
+        client: "ZmqRpcClient",
+        session_id: str,
+        *,
+        push_socket=None,
+        robot=None,
+        period: float | None = None,
+    ):
         self._client = client
         self._id = session_id
         self._push = push_socket
         self._robot = robot
+        self._period = period
         self._started_at = time.perf_counter()
+        self._t_next = self._started_at
+        self._t_last = self._started_at
+        self._tick_count = 0
+        self._dt = 0.0
+        self._stopped = False
+        self._in_control_seen = False
+        self._probed_at = self._started_at
+        self._snapshot = None
+        self._snapshot_at = self._started_at
 
     def __enter__(self):
         return self
@@ -103,12 +129,125 @@ class _TrackerProxy:
         return self._kind
 
     def status(self) -> dict[str, Any]:
+        """The server's view of this session: `running`, `iterations`, `error`.
+
+        Costs an RPC round trip.
+        """
         return self._client.call("tracker.status", {"session_id": self._id})
 
     @property
     def is_running(self) -> bool:
         """Whether the tracker is still active. Costs an RPC round trip."""
-        return bool(self.status()["running"])
+        if self._stopped:
+            return False
+        status = self.status()
+        return bool(status.get("running", False)) if isinstance(status, dict) else False
+
+    @property
+    def period(self) -> float | None:
+        """The configured loop period in seconds, or None if the tracker is unpaced."""
+        return self._period
+
+    @property
+    def dt(self) -> float:
+        """The timestep most recently returned by :meth:`tick` (0.0 before the first tick)."""
+        return self._dt
+
+    @property
+    def tick_count(self) -> int:
+        """Number of ticks that have run, i.e. returned a timestep rather than None."""
+        return self._tick_count
+
+    def tick(self) -> float | None:
+        """Sleep to maintain the requested period and return the measured timestep.
+
+        Returns the wall-clock seconds elapsed since the previous tick, or ``None``
+        once the tracker is no longer active, so a loop can pace itself and get a timestep to integrate with:
+
+            while dt := tracker.tick():
+                tracker.set_target(integrate(dt))
+
+        The returned timestep is always non-zero positive.
+
+        On the first call, returns immediately (no sleep) and reports ``period``. On subsequent calls, sleeps the
+        remaining time until the next tick boundary so that loop body time is
+        compensated for; a body that overran its period shows up as a timestep larger
+        than ``period``. If no period was set, measures and returns without sleeping.
+
+        Pacing re-anchors on ``_t_next += period`` ever tick. An
+        overrun resets the schedule to the moment the tick returns, so a slow body
+        re-phases the loop instead of making the next few ticks fire back to back
+        to catch up like the franky tracker.
+
+        Where franky reads ``robot.is_in_control`` in-process, here we get notified from the state stream, which it starts on first use.
+        Until a snapshot confirms the controller is in control, it falls back to a
+        once-a-second `status()` RPC, so a tracker that dies before publishing
+        anything still ends the loop. That also means `tick()` raises whatever the
+        state stream raises.
+        """
+        if self._stopped:
+            return None
+
+        if self._robot is not None:
+            # `tick()` ends the loop when the controller does, and the state
+            # stream is how it finds out, so it cannot wait for `state` to be
+            # read from the loop body to get the stream running.
+            self._robot.start_state_stream()
+            if getattr(self._robot, "_state_stream_error", None) is not None:
+                raise self._robot._state_stream_error
+
+        first = self._tick_count == 0
+
+        if self._period is not None:
+            if first:
+                self._t_next = time.perf_counter() + self._period
+            else:
+                remaining = self._t_next - time.perf_counter()
+                if remaining > 0:
+                    time.sleep(remaining)
+                    self._t_next += self._period
+                else:
+                    self._t_next = time.perf_counter() + self._period
+
+        # Checked after pacing, as franky does, so the loop stops on the tick the
+        # controller ended rather than running one more body first.
+        if not self._still_in_control():
+            self._stopped = True
+            return None
+
+        now = time.perf_counter()
+        if first:
+            self._dt = max(self._period, _MIN_DT) if self._period is not None else _MIN_DT
+        else:
+            self._dt = max(now - self._t_last, _MIN_DT)
+        self._t_last = now
+
+        self._tick_count += 1
+        return self._dt
+
+    def _still_in_control(self) -> bool:
+        """Whether the controller is still running, for `tick()`.
+
+        """
+        now = time.perf_counter()
+
+        if self._robot is not None:
+            latest = self._robot.latest_state
+            if latest is not self._snapshot:
+                self._snapshot = latest
+                self._snapshot_at = now
+            in_control = None if latest is None else latest.get("in_control")
+            if in_control:
+                self._in_control_seen = True
+                if now - self._snapshot_at < _PROBE_INTERVAL:
+                    return True
+            elif in_control is False and self._in_control_seen:
+                return False
+
+        if now - self._probed_at < _PROBE_INTERVAL:
+            return True
+        self._probed_at = now
+        return self.is_running
 
     @property
     def iterations(self) -> int:
@@ -127,7 +266,7 @@ class _TrackerProxy:
         Unlike `franky`'s `tracker.state` this is the msgpack snapshot dict, not a
         `RobotState`. The background stream starts on first access, so this is
         None until the first snapshot lands; use `robot.wait_for_state()` to
-        block for it. Requires the server to have a `pub_bind`.
+        block for it.
         """
         if self._robot is None:
             raise RuntimeError("This proxy was constructed without a robot; state is unavailable")
@@ -140,23 +279,31 @@ class _TrackerProxy:
 
     @property
     def current_joint_positions(self) -> list[float] | None:
-        """Measured joint positions from the latest state snapshot."""
+        """Measured joint positions from the latest state snapshot.
+
+        Read from the state stream (no network round trip). None until the
+        first snapshot lands.
+        """
         return self._state_field("q")
 
     @property
     def current_joint_velocities(self) -> list[float] | None:
-        """Measured joint velocities from the latest state snapshot."""
+        """Measured joint velocities from the latest state snapshot.
+
+        Read from the state stream (no network round trip). None until the
+        first snapshot lands.
+        """
         return self._state_field("dq")
 
     @property
     def last_reference(self) -> dict[str, Any] | None:
         """The reference the controller last picked up, from the state stream.
 
-        `set_target` goes over a CONFLATE socket, so this is how a client
-        confirms what landed. Carries `type` plus that reference's fields, in the
-        types `set_target` takes: `q`/`dq`/`tau_ff`, or `target` as an `Affine`
-        with `target_twist`/`target_acceleration`. A torque tracker reports its
-        commanded `tau`. None before the first snapshot, or before any reference
+        References are sent over a CONFLATE socket, which drops stale
+        undelivered messages. Clients only know what the server actually
+        recieved when the serer tells them.
+
+        None before the first snapshot, or before any reference
         is set.
         """
         reference = self._state_field("reference")
@@ -177,7 +324,11 @@ class _TrackerProxy:
 
     @property
     def current_pose(self) -> RobotPose | None:
-        """The end-effector pose, as `franky`'s `current_pose` is."""
+        """The end-effector pose, as `franky`'s `current_pose` is.
+
+        Read from the state stream (no network round trip). None until the
+        first snapshot lands.
+        """
         matrix = self._state_field("O_T_EE")
         return None if matrix is None else RobotPose(Affine(matrix))
 
@@ -186,13 +337,12 @@ class _TrackerProxy:
 
         Matches `franky`'s tracker `stop()`: the server enqueues a
         `TorqueStopMotion` ramp and joins it, so this returns once the arm is at
-        rest. `stop_motion` overrides the ramp; a `join_timeout` float caps the
-        server-side wait, at the cost of possibly returning mid-ramp.
+        rest.
 
         Since the join blocks on the robot, this call gets its own longer RPC
-        timeout — the default 5 s would otherwise abort a ramp that is proceeding
-        normally. Calling it twice is harmless, as the context manager relies on.
+        timeout. Calling it twice is harmless.
         """
+        self._stopped = True
         params: dict[str, Any] = {"session_id": self._id, "join_timeout": join_timeout}
         if stop_motion is not None:
             params["stop_motion"] = encode_motion(stop_motion)
@@ -211,8 +361,27 @@ class _TrackerProxy:
 class JointImpedanceTrackerProxy(_TrackerProxy):
     _kind = "joint"
 
+    @property
+    def current_joint_state(self) -> JointState | None:
+        """The current joint state as a JointState (shorthand for robot.current_joint_state).
+
+        Read from the state stream (no network round trip). None until the
+        first snapshot lands.
+        """
+        q = self.current_joint_positions
+        if q is None:
+            return None
+        dq = self.current_joint_velocities
+        return JointState(q, dq)
+
     def set_target(self, q, dq=None, tau_ff=None):
-        """Update the joint target position, optional velocity, and optional feedforward torque."""
+        """Update the joint target position, optional velocity, and optional feedforward torque.
+
+        Goes over the conflating tracker socket, so it costs no round trip and a
+        slower update may be dropped in favour of a newer one; `last_reference`
+        reports what the controller actually picked up. Falls back to RPC when
+        the client was set up without a tracker port.
+        """
         return self._send_reference(
             "tracker.set_joint_reference",
             {
@@ -233,6 +402,9 @@ class JointImpedanceTrackerProxy(_TrackerProxy):
         (or passing `franky.CRITICAL`) leaves it unpinned so the controller
         re-tracks critical damping against the smoothed stiffness every cycle.
         A stiffness change therefore re-criticals unless damping is passed too.
+
+        Unlike `set_target`, this costs an RPC round trip, so it is not free to
+        call every cycle. Naming no gain at all returns without one.
         """
         if gains is not None:
             if stiffness is not None or damping is not None:
@@ -266,6 +438,9 @@ class JointImpedanceTrackerProxy(_TrackerProxy):
         the hybrid path itself is fixed for the lifetime of the motion. Takes the
         same arguments as `CartesianImpedanceTrackerProxy.set_gains` minus the
         nullspace, which a joint tracker has no tasks for.
+
+        Unlike `set_target`, this costs an RPC round trip, so it is not free to
+        call every cycle. Naming no gain at all returns without one.
         """
         payload = _cartesian_gains_payload(gains, translational_stiffness, rotational_stiffness, damping)
         if payload is None:
@@ -277,7 +452,13 @@ class CartesianImpedanceTrackerProxy(_TrackerProxy):
     _kind = "cartesian"
 
     def set_target(self, pose, twist=None, acceleration=None):
-        """Update the Cartesian target pose and optional twist/acceleration feedforward."""
+        """Update the Cartesian target pose and optional twist/acceleration feedforward.
+
+        Goes over the conflating tracker socket, so it costs no round trip and a
+        slower update may be dropped in favour of a newer one; `last_reference`
+        reports what the controller actually picked up. Falls back to RPC when
+        the client was set up without a tracker port.
+        """
         return self._send_reference(
             "tracker.set_cartesian_reference",
             {
@@ -313,6 +494,9 @@ class CartesianImpedanceTrackerProxy(_TrackerProxy):
         For the nullspace, `posture_stiffness` nudges just the posture task's
         stiffness; `nullspace_gains` replaces the whole `NullspaceGains`. The two
         are mutually exclusive, and both only retune tasks configured at start.
+
+        Unlike `set_target`, this costs an RPC round trip, so it is not free to
+        call every cycle. Naming no gain at all returns without one.
         """
         if nullspace_gains is not None and posture_stiffness is not None:
             raise ValueError("Pass either nullspace_gains or posture_stiffness, not both")
@@ -340,7 +524,11 @@ class CartesianImpedanceTrackerProxy(_TrackerProxy):
         manipulability_damping: float = 0.0,
         manipulability_max_torque: float | None = None,
     ):
-        """Update the nullspace gains acting on the redundant joint."""
+        """Update the nullspace gains acting on the redundant joint.
+
+        Only retunes tasks configured at start. Unlike `set_target`, this costs
+        an RPC round trip.
+        """
         if gains is not None:
             payload = encode_rpc_value(gains)
         else:
@@ -359,11 +547,21 @@ class TorqueTrackerProxy(_TrackerProxy):
     _kind = "torque"
 
     def set_torque(self, torque):
-        """Command raw joint torques. Call faster than the motion's `signal_timeout`."""
+        """Command raw joint torques. Call faster than the motion's `signal_timeout`.
+
+        Goes over the conflating tracker socket, so it costs no round trip and a
+        slower update may be dropped in favour of a newer one; `last_reference`
+        reports what the controller actually picked up. Falls back to RPC when
+        the client was set up without a tracker port.
+        """
         return self._send_reference("tracker.set_torque", {"torque": encode_rpc_value(torque)})
 
     def get_torque(self):
-        """The torque the server most recently handed to the controller."""
+        """The torque the server most recently handed to the controller.
+
+        Costs an RPC round trip; the same value rides the state stream as
+        `last_reference`.
+        """
         return self._client.call("tracker.get_torque", {"session_id": self._id})
 
 
@@ -437,10 +635,23 @@ class RobotProxy:
 
     @property
     def latest_state(self) -> dict[str, Any] | None:
+        """The most recent state snapshot, or None if none has landed yet.
+
+        A plain read of what the background stream last received, so it costs no
+        round trip and never blocks. It does not start the stream, and it
+        outlives the tracker that produced it — `wait_for_state` blocks for a
+        first snapshot instead.
+        """
         with self._state_condition:
             return self._latest_state
 
     def wait_for_state(self, timeout: float | None = None) -> dict[str, Any]:
+        """Block until the state stream delivers a snapshot, and return it.
+
+        Waits on the stream rather than asking the server, so it costs no round
+        trip, but it needs `start_state_stream` to have been called. Raises
+        whatever the stream raised, or `TimeoutError` if `timeout` elapses first.
+        """
         with self._state_condition:
             self._state_condition.wait_for(
                 lambda: self._latest_state is not None or self._state_stream_error is not None,
@@ -453,6 +664,13 @@ class RobotProxy:
             return self._latest_state
 
     def start_state_stream(self, topic: str = "robot.state", timeout_ms: int = 250) -> None:
+        """Subscribe to the server's state PUB socket on a background thread.
+
+        Costs no round trip: the server publishes each control cycle whether or
+        not anyone is listening. Idempotent while the thread is alive, so it is
+        cheap to call from a loop. Errors are stored rather than raised here, and
+        surface from `wait_for_state` and `tick`.
+        """
         if self._state_stream_thread is not None and self._state_stream_thread.is_alive():
             return
         self._state_stream_stop.clear()
@@ -485,6 +703,11 @@ class RobotProxy:
         self._state_stream_thread.start()
 
     def stop_state_stream(self, join_timeout: float | None = 1.0) -> None:
+        """Stop the background subscriber and join its thread.
+
+        Leaves `latest_state` holding the last snapshot received. Anything that
+        reads the stream restarts it on next use.
+        """
         self._state_stream_stop.set()
         thread = self._state_stream_thread
         if thread is not None and threading.current_thread() is not thread:
@@ -496,9 +719,19 @@ class RobotProxy:
             self._state_condition.notify_all()
 
     def recover_from_errors(self):
+        """Clear the robot's error state so it will accept motions again.
+
+        Costs an RPC round trip.
+        """
         return self._client.call("robot.recover_from_errors", {"robot_id": self._id})
 
     def move(self, motion, asynchronous: bool = False):
+        """Run a motion, blocking until it finishes unless `asynchronous`.
+
+        Costs an RPC round trip to enqueue. A synchronous move always enqueues
+        asynchronously on the server and then polls `join_motion`, so that a long
+        motion cannot outlive the RPC timeout; expect a round trip per poll.
+        """
         params = {
             "robot_id": self._id,
             "motion": encode_motion(motion),
@@ -516,18 +749,36 @@ class RobotProxy:
         return result
 
     def join_motion(self, timeout: float | None = None) -> bool:
+        """Wait for the active motion to finish, returning whether it did.
+
+        Costs an RPC round trip, and the server holds it open for up to
+        `timeout` seconds.
+        """
         return bool(self._client.call("robot.join_motion", {"robot_id": self._id, "timeout": timeout}))
 
     def poll_motion(self) -> bool:
+        """Whether the active motion has finished, without waiting for it.
+
+        Costs an RPC round trip.
+        """
         return bool(self._client.call("robot.poll_motion", {"robot_id": self._id}))
 
     def stop(self):
+        """Stop the active motion, as `franky`'s `Robot.stop` does.
+
+        Costs an RPC round trip. This is the hard stop; a tracker's own `stop`
+        ramps the arm down instead.
+        """
         return self._client.call("robot.stop", {"robot_id": self._id})
 
     def get_last_teleop_state(self):
+        """The last state the server's motion callback recorded.
+
+        Costs an RPC round trip. Use `latest_state` to get the one cached from the state stream.
+        """
         return self._client.call("robot.get_last_teleop_state", {"robot_id": self._id})
 
-    def _start_tracker(self, method: str, policy, policy_transport: str, period: float, stop_on_policy_error: bool, motion_kwargs) -> str:
+    def _start_tracker(self, method: str, policy, policy_transport: str, period: float | None, stop_on_policy_error: bool, motion_kwargs) -> str:
         params = {
             "robot_id": self._id,
             "motion_kwargs": encode_rpc_value(motion_kwargs),
@@ -543,7 +794,7 @@ class RobotProxy:
         policy=None,
         *,
         policy_transport: str = "import",
-        period: float = 0.001,
+        period: float | None = 0.001,
         stop_on_policy_error: bool = True,
         **motion_kwargs,
     ) -> JointImpedanceTrackerProxy:
@@ -552,38 +803,56 @@ class RobotProxy:
         Without a `policy`, the returned proxy is a passthrough: set references
         from client code with `set_target`. With one, the server runs the policy
         loop at `period` next to the robot.
+
+        Starting costs an RPC round trip.
         """
         session_id = self._start_tracker(
             "robot.start_joint_tracker", policy, policy_transport, period, stop_on_policy_error, motion_kwargs
         )
-        return JointImpedanceTrackerProxy(self._client, session_id, push_socket=self._push_socket, robot=self)
+        return JointImpedanceTrackerProxy(
+            self._client, session_id, push_socket=self._push_socket, robot=self, period=period
+        )
 
     def start_cartesian_impedance_tracker(
         self,
         policy=None,
         *,
         policy_transport: str = "import",
-        period: float = 0.001,
+        period: float | None = 0.001,
         stop_on_policy_error: bool = True,
         **motion_kwargs,
     ) -> CartesianImpedanceTrackerProxy:
-        """Start Cartesian impedance tracking, the networked counterpart to `franky.CartesianImpedanceTracker`."""
+        """Start Cartesian impedance tracking, the networked counterpart to `franky.CartesianImpedanceTracker`.
+
+        Starting costs an RPC round trip.
+        """
         session_id = self._start_tracker(
             "robot.start_cartesian_tracker", policy, policy_transport, period, stop_on_policy_error, motion_kwargs
         )
-        return CartesianImpedanceTrackerProxy(self._client, session_id, push_socket=self._push_socket, robot=self)
+        return CartesianImpedanceTrackerProxy(
+            self._client, session_id, push_socket=self._push_socket, robot=self, period=period
+        )
 
-    def start_torque_tracker(self, **motion_kwargs) -> TorqueTrackerProxy:
+    def start_torque_tracker(self, period: float | None = None, **motion_kwargs) -> TorqueTrackerProxy:
         """Start direct joint-torque control.
 
         Call ``set_torque`` more frequently than ``signal_timeout`` (50 ms by
         default). The server-side franky watchdog terminates stale streams.
+
+        Starting costs an RPC round trip.
         """
         params = {"robot_id": self._id, "motion_kwargs": encode_rpc_value(motion_kwargs)}
         session_id = self._client.call("robot.start_torque_tracker", params)
-        return TorqueTrackerProxy(self._client, session_id, push_socket=self._push_socket, robot=self)
+        return TorqueTrackerProxy(
+            self._client, session_id, push_socket=self._push_socket, robot=self, period=period
+        )
 
     def state_subscriber(self, topic: str = "robot.state", timeout_ms: int = 1000):
+        """A raw subscriber onto the state PUB socket, filtered to this robot.
+
+        For reading the stream yourself instead of through `start_state_stream`.
+        Connecting costs no round trip.
+        """
         from zero_franky.pubsub import StateSubscriber
         from zero_franky.setup import cfg
 

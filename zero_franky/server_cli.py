@@ -18,7 +18,6 @@ def tcp_endpoint(host: str, port: int) -> str:
 def add_server_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--host", default=DEFAULT_HOST, help=f"Interface to bind RPC/PUB sockets on [{DEFAULT_HOST}]")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"RPC port [{DEFAULT_PORT}]")
-    parser.add_argument("--no-pub", action="store_true", help="Disable state PUB and tracker update sockets")
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -29,17 +28,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def build_server(args: argparse.Namespace):
     bind = tcp_endpoint(args.host, args.port)
-    pub_bind = None if args.no_pub else tcp_endpoint(args.host, args.port + STATE_PORT_OFFSET)
-    tracker_bind = None if args.no_pub else tcp_endpoint(args.host, args.port + TRACKER_PORT_OFFSET)
+    pub_bind = tcp_endpoint(args.host, args.port + STATE_PORT_OFFSET)
+    tracker_bind = tcp_endpoint(args.host, args.port + TRACKER_PORT_OFFSET)
 
     from zero_franky.zmq_server import ZmqRobotServer
 
     print(f"zero_franky RPC server on {bind}", flush=True)
-    if pub_bind is None:
-        print("zero_franky state pub/tracker disabled", flush=True)
-    else:
-        print(f"zero_franky state pub on {pub_bind}", flush=True)
-        print(f"zero_franky tracker updates on {tracker_bind}", flush=True)
+    print(f"zero_franky state pub on {pub_bind}", flush=True)
+    print(f"zero_franky tracker updates on {tracker_bind}", flush=True)
 
     return ZmqRobotServer(bind=bind, pub_bind=pub_bind, tracker_bind=tracker_bind)
 
