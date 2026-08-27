@@ -15,8 +15,8 @@ name = "cffi"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", version = "2.23", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10' and implementation_name != 'PyPy'" },
-    { name = "pycparser", version = "3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10' and implementation_name != 'PyPy'" },
+    { name = "pycparser", version = "2.23", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "pycparser", version = "3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/eb/56/b1ba7935a17738ae8453301356628e8147c79dbb825bcbc73dc7401f9846/cffi-2.0.0.tar.gz", hash = "sha256:44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529", size = 523588, upload-time = "2025-09-08T23:24:04.541Z" }
 wheels = [
@@ -239,7 +239,7 @@ wheels = [
 
 [package.optional-dependencies]
 toml = [
-    { name = "tomli", marker = "python_full_version < '3.10'" },
+    { name = "tomli" },
 ]
 
 [[package]]
@@ -364,7 +364,7 @@ wheels = [
 
 [package.optional-dependencies]
 toml = [
-    { name = "tomli", marker = "python_full_version >= '3.10' and python_full_version <= '3.11'" },
+    { name = "tomli", marker = "python_full_version <= '3.11'" },
 ]
 
 [[package]]
@@ -372,7 +372,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+    { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -381,8 +381,8 @@ wheels = [
 
 [[package]]
 name = "franky-control"
-version = "1.1.4+libfranka.0.21.2"
-source = { registry = "https://nickswalker.github.io/franky/whl/libfranka-0.21.2/" }
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "2.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
@@ -391,18 +391,18 @@ dependencies = [
     { name = "websockets", version = "16.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
 wheels = [
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4%2Blibfranka.0.21.2-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:6501770a5cc260998e951ea1fa99bc3cd066fb8cf01359fe96ef157bc5ae5617" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4%2Blibfranka.0.21.2-cp310-cp310-manylinux_2_34_x86_64.whl", hash = "sha256:ec1c4eee1a4bc33666c77091615994cf42ec2a48502e7d01177141f64cb9f7e9" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4%2Blibfranka.0.21.2-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:0bc1468231cdb09cc8c9cd5ba032e99e7a9c32839e07edcfffcb04d025cadfc2" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4%2Blibfranka.0.21.2-cp311-cp311-manylinux_2_34_x86_64.whl", hash = "sha256:799c5243b25f64d090471eb4c31b448acee19004b50b48d936dc993e56a91949" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4%2Blibfranka.0.21.2-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:81578f21f4db41ddf9da21f549fcf67543f33489f5b3e450facfff2703d0af3c" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4%2Blibfranka.0.21.2-cp312-cp312-manylinux_2_34_x86_64.whl", hash = "sha256:8ac26470b4f23b16b98368f18222386a2ec26bdff56584a1d37566dc54d31ed8" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4%2Blibfranka.0.21.2-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:d49d87f74a3b5533a127f7a2aa368cd34f7c8e9c6564d520545a2026fadb50d9" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4%2Blibfranka.0.21.2-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:f9175e302c332ea871c2f09c8d3373547426f458708aac4e67af0b19e033bd9a" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4%2Blibfranka.0.21.2-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:edd4de277ab89f2a7250af3f8b691c2020ccfaecf8a349059b58f0746f5d095d" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4%2Blibfranka.0.21.2-cp314-cp314-manylinux_2_34_x86_64.whl", hash = "sha256:f627bc3d4945794170526d33e9ae9cdfef4077d63f92e86b23a04b9b4f2b857a" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4%2Blibfranka.0.21.2-cp39-cp39-manylinux_2_28_x86_64.whl", hash = "sha256:c725015363c82cdbfe85a61c60c59f31fe2c21aed13636b23a70d10a89e684c2" },
-    { url = "https://github.com/nickswalker/franky/releases/download/wheels-libfranka-0.21.2/franky_control-1.1.4%2Blibfranka.0.21.2-cp39-cp39-manylinux_2_34_x86_64.whl", hash = "sha256:99a087e721814365ce0b33da13821df6ec9df01770793dc14dc236a92697254f" },
+    { url = "https://files.pythonhosted.org/packages/b2/67/47d63cd485f75e1ddc7ca3b7914c989f357cb63fddcd3ae5501fb03ac1b0/franky_control-2.0.0-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:e420d5bb5c3bf8930b9f9e617037d1e1ac85d379a5e12d7b838fa7de74bb7615", size = 3734588, upload-time = "2026-08-24T15:02:59.245Z" },
+    { url = "https://files.pythonhosted.org/packages/29/df/f895c2405ef922f2fc6163bc163f87ac5219b30105b47399ba568d560368/franky_control-2.0.0-cp310-cp310-manylinux_2_34_x86_64.whl", hash = "sha256:c357e8037383e7acc7c7a6da583d2f4aa899c3b1c11f312d88f448624de0017b", size = 3605501, upload-time = "2026-08-24T15:03:01.386Z" },
+    { url = "https://files.pythonhosted.org/packages/64/74/8d53bedfbe5ae90fb33f8f1b7fe6deec1a6f72cb36f19056f9c049e7d2a3/franky_control-2.0.0-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:c0a9aaea3d55ed94daeae887dff6bfd09a342feb6a7c7151dfafa0e6677f028f", size = 3733778, upload-time = "2026-08-24T15:03:03.085Z" },
+    { url = "https://files.pythonhosted.org/packages/82/58/a57b8c7f8cc6196ee190f158369cc585ff4d0d6d62488a22179e56f3d42d/franky_control-2.0.0-cp311-cp311-manylinux_2_34_x86_64.whl", hash = "sha256:f14f8addbecf28325b03fcdaf455a0fafa500cd69a9bbc229bf2a795ac2c8fe6", size = 3606198, upload-time = "2026-08-24T15:03:04.899Z" },
+    { url = "https://files.pythonhosted.org/packages/75/42/486c7a5bcc2749cb8fb2b3883735b1eb2c6856a05310ea65ba4f30815aaa/franky_control-2.0.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:1d571d45cc84b0df1fb0f961b31cc6d74d4f9721381e9eaef976d10d7c318516", size = 3740439, upload-time = "2026-08-24T15:03:06.962Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/3c/36b71c8e785ccfadf52a03a70cc8158d360289069edd6f541acb080caacf/franky_control-2.0.0-cp312-cp312-manylinux_2_34_x86_64.whl", hash = "sha256:aed8520d9f671db8eabb5738360a1c4bf29a5fd14e493c9f74a3fc2e6959ff2d", size = 3621358, upload-time = "2026-08-24T15:03:08.717Z" },
+    { url = "https://files.pythonhosted.org/packages/2d/20/01edfc81fe28b653bd8a602146a3b4cb0be93a21910be74324b79ad9d2e2/franky_control-2.0.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:a53d41029ecce8773dda9b6792474363f107d8985bfa3c67158b27afe42df07a", size = 3740426, upload-time = "2026-08-24T15:03:10.561Z" },
+    { url = "https://files.pythonhosted.org/packages/17/67/74728837b1d53455fb0c726f3ea29d88171b596d0e6d8217ac54ebc0312e/franky_control-2.0.0-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:156776cfce42982e9104da1fb7506d9af69fe83cab6bc3e2993656f48cba9617", size = 3621454, upload-time = "2026-08-24T15:03:12.341Z" },
+    { url = "https://files.pythonhosted.org/packages/23/ea/e55b689d91951cf5c7638c0ef75051486bff7ecc0be48cbc29431f0e2b77/franky_control-2.0.0-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:c789d833125d2cea277551bfa3c70f3ecb2fef0dfe9330a960aac819d919d501", size = 3742204, upload-time = "2026-08-24T15:03:14.132Z" },
+    { url = "https://files.pythonhosted.org/packages/30/50/fa6a9118bcd96b1fa4cb02801d36d87dc8802b4545583f6a17b9faa2e601/franky_control-2.0.0-cp314-cp314-manylinux_2_34_x86_64.whl", hash = "sha256:3e0bb5a72cd9d1ac0960c18cd9309701b84591ba688fa0f46d49ec042f13d936", size = 3623049, upload-time = "2026-08-24T15:03:15.842Z" },
+    { url = "https://files.pythonhosted.org/packages/74/72/f2a9aa50175e273927d7c444b00d8fe9bc384acfffc2e7cd99df86c79f27/franky_control-2.0.0-cp39-cp39-manylinux_2_28_x86_64.whl", hash = "sha256:ea4fd5fc9007d4e1d94edb4e71979869ef2627b01db42940559c6357f77a7780", size = 3734457, upload-time = "2026-08-24T15:03:17.69Z" },
+    { url = "https://files.pythonhosted.org/packages/61/75/105723c5b075b73d35ed14a45159d0d447850c1fb82ebeb489be30ee148b/franky_control-2.0.0-cp39-cp39-manylinux_2_34_x86_64.whl", hash = "sha256:005b4c39ffbd305ddac5f947261f61dee25c21054cdc7f9c191447f15ef7bc1b", size = 3605859, upload-time = "2026-08-24T15:03:19.767Z" },
 ]
 
 [[package]]
@@ -438,7 +438,7 @@ name = "minimalmodbus"
 version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyserial", marker = "python_full_version < '3.10'" },
+    { name = "pyserial" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/37/fc/8a58f7bcdece751f16a4a9aac780acd1288aa8ac6adbffdd764c88fb71c6/minimalmodbus-2.1.1.tar.gz", hash = "sha256:c3f5a56e107d537e4bb420f7e735841ab2939c8ca6fb528f5fe4124571315b64", size = 102512, upload-time = "2023-07-17T19:51:19.184Z" }
 wheels = [
@@ -791,7 +791,7 @@ resolution-markers = [
     "python_full_version < '3.10'",
 ]
 dependencies = [
-    { name = "minimalmodbus", marker = "python_full_version < '3.10'" },
+    { name = "minimalmodbus" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/32/00/b6929c7dc626b09361733bd2120eb157bc9df0bba038b77074f81a5d1b0b/pyrobotiqgripper-1.0.1.tar.gz", hash = "sha256:541427349bc37b46e3f23d0c4711882782429cb71d4fe8bb1d2511fe0bc4ee49", size = 8159, upload-time = "2025-06-25T03:03:18.947Z" }
 wheels = [
@@ -810,10 +810,10 @@ resolution-markers = [
     "python_full_version == '3.10.*'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pymodbus", marker = "python_full_version >= '3.10'" },
-    { name = "pyserial", marker = "python_full_version >= '3.10'" },
+    { name = "pymodbus" },
+    { name = "pyserial" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/13/d1/bc76093e0402fcfa90edd7c304b42221bb103c6ff865e1d404d4e3d3510e/pyrobotiqgripper-3.2.7.tar.gz", hash = "sha256:b87b9ec309cc2c3f69057db71e090932e17249af5a29db14f957249a66c2ea47", size = 25524, upload-time = "2026-06-19T12:32:47.834Z" }
 wheels = [
@@ -837,13 +837,13 @@ resolution-markers = [
     "python_full_version < '3.10'",
 ]
 dependencies = [
-    { name = "colorama", marker = "python_full_version < '3.10' and sys_platform == 'win32'" },
-    { name = "exceptiongroup", marker = "python_full_version < '3.10'" },
-    { name = "iniconfig", version = "2.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
-    { name = "packaging", marker = "python_full_version < '3.10'" },
-    { name = "pluggy", marker = "python_full_version < '3.10'" },
-    { name = "pygments", marker = "python_full_version < '3.10'" },
-    { name = "tomli", marker = "python_full_version < '3.10'" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "exceptiongroup" },
+    { name = "iniconfig", version = "2.1.0", source = { registry = "https://pypi.org/simple" } },
+    { name = "packaging" },
+    { name = "pluggy" },
+    { name = "pygments" },
+    { name = "tomli" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a3/5c/00a0e072241553e1a7496d638deababa67c5058571567b92a7eaa258397c/pytest-8.4.2.tar.gz", hash = "sha256:86c0d0b93306b961d58d62a4db4879f27fe25513d4b969df351abdddb3c30e01", size = 1519618, upload-time = "2025-09-04T14:34:22.711Z" }
 wheels = [
@@ -862,13 +862,13 @@ resolution-markers = [
     "python_full_version == '3.10.*'",
 ]
 dependencies = [
-    { name = "colorama", marker = "python_full_version >= '3.10' and sys_platform == 'win32'" },
-    { name = "exceptiongroup", marker = "python_full_version == '3.10.*'" },
-    { name = "iniconfig", version = "2.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "packaging", marker = "python_full_version >= '3.10'" },
-    { name = "pluggy", marker = "python_full_version >= '3.10'" },
-    { name = "pygments", marker = "python_full_version >= '3.10'" },
-    { name = "tomli", marker = "python_full_version == '3.10.*'" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "iniconfig", version = "2.3.0", source = { registry = "https://pypi.org/simple" } },
+    { name = "packaging" },
+    { name = "pluggy" },
+    { name = "pygments" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7d/0d/549bd94f1a0a402dc8cf64563a117c0f3765662e2e668477624baeec44d5/pytest-9.0.3.tar.gz", hash = "sha256:b86ada508af81d19edeb213c681b1d48246c1a91d304c6c81a427674c17eb91c", size = 1572165, upload-time = "2026-04-07T17:16:18.027Z" }
 wheels = [
@@ -1198,7 +1198,7 @@ wheels = [
 
 [[package]]
 name = "zero-franky"
-version = "0.1.2"
+version = "0.1.3"
 source = { editable = "." }
 dependencies = [
     { name = "cloudpickle" },
@@ -1223,7 +1223,7 @@ server = [
 [package.metadata]
 requires-dist = [
     { name = "cloudpickle", specifier = ">=2.2.0" },
-    { name = "franky-control", marker = "extra == 'server'", index = "https://nickswalker.github.io/franky/whl/libfranka-0.21.2/" },
+    { name = "franky-control", marker = "extra == 'server'", specifier = ">=2.0.0" },
     { name = "msgpack", specifier = ">=1.0.0" },
     { name = "pyrobotiqgripper", marker = "extra == 'robotiq'" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },

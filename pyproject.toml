@@ -24,7 +24,7 @@ zero-franky = "zero_franky.cli:main"
 [project.optional-dependencies]
 
 server = [
-    "franky-control"
+    "franky-control>=2.0.0"
     ]
 
 robotiq = [
@@ -35,11 +35,3 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0"
     ]
-
-[[tool.uv.index]]
-name = "franky-fork-libfranka-0-21-2"
-url = "https://nickswalker.github.io/franky/whl/libfranka-0.21.2/"
-explicit = true
-
-[tool.uv.sources]
-franky-control = { index = "franky-fork-libfranka-0-21-2" }
