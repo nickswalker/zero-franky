@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 import inspect
 import threading
 import time
@@ -19,6 +19,9 @@ from zero_franky.protocol import (
 )
 from zero_franky.types import Affine, JointState, RobotPose, Twist, TwistAcceleration
 
+#: Supported ways to transport a policy to the server.
+PolicyTransport = Literal["import", "cloudpickle"]
+
 #: Floor for the timestep reported by `tick()`.
 _MIN_DT = 1e-9
 
@@ -27,7 +30,7 @@ _MIN_DT = 1e-9
 _PROBE_INTERVAL = 1.0
 
 
-def encode_policy(policy, transport: str = "import") -> dict[str, Any]:
+def encode_policy(policy, transport: PolicyTransport = "import") -> dict[str, Any]:
     if transport == "import":
         module = inspect.getmodule(policy)
         qualname = getattr(policy, "__qualname__", None)
@@ -818,7 +821,7 @@ class RobotProxy:
         """
         return self._client.call("robot.get_last_teleop_state", {"robot_id": self._id})
 
-    def _start_tracker(self, method: str, policy, policy_transport: str, period: float | None, stop_on_policy_error: bool, motion_kwargs) -> str:
+    def _start_tracker(self, method: str, policy, policy_transport: PolicyTransport, period: float | None, stop_on_policy_error: bool, motion_kwargs) -> str:
         params = {
             "robot_id": self._id,
             "motion_kwargs": encode_rpc_value(motion_kwargs),
@@ -833,7 +836,7 @@ class RobotProxy:
         self,
         policy=None,
         *,
-        policy_transport: str = "import",
+        policy_transport: PolicyTransport = "import",
         period: float | None = 0.001,
         stop_on_policy_error: bool = True,
         **motion_kwargs,
@@ -857,7 +860,7 @@ class RobotProxy:
         self,
         policy=None,
         *,
-        policy_transport: str = "import",
+        policy_transport: PolicyTransport = "import",
         period: float | None = 0.001,
         stop_on_policy_error: bool = True,
         **motion_kwargs,

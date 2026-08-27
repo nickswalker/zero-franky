@@ -12,22 +12,19 @@ class Config:
     TRACKER_PORT: int | None = None
 
 cfg = Config()
-_DEFAULT_PUB_PORT = object()
 
 
 def setup_zero_franky(
     ip,
     port,
-    pub_port: int | None | object = _DEFAULT_PUB_PORT,
 ) -> None:
     """Configure the default server connection used by :class:`zero_franky.Robot`.
 
-    ``port`` is the RPC port; state and tracker transports default to ``port + 1``
-    and ``port + 2``. Pass ``pub_port=None`` to disable both streams.
+    ``port`` is the RPC port; state and tracker transports use ``port + 1`` and
+    ``port + 2``.
     """
-    resolved_pub_port = port + 1 if pub_port is _DEFAULT_PUB_PORT else pub_port
     cfg.IS_SETUP = True
     cfg.IP = ip
     cfg.PORT = port
-    cfg.PUB_PORT = resolved_pub_port
-    cfg.TRACKER_PORT = None if resolved_pub_port is None else resolved_pub_port + 1
+    cfg.PUB_PORT = port + 1
+    cfg.TRACKER_PORT = port + 2

@@ -1,4 +1,5 @@
 # zero-franky
+[![PyPI version](https://img.shields.io/pypi/v/zero-franky.svg)](https://pypi.org/project/zero-franky/)
 
 Use [`franky`](https://github.com/TimSchneider42/franky) from another process over ZeroMQ.
 

@@ -21,20 +21,26 @@ Connection setup
 Tracker proxies
 ---------------
 
+Joint impedance
+~~~~~~~~~~~~~~~
+
 .. autoclass:: zero_franky.zmq_client.JointImpedanceTrackerProxy
    :members:
    :inherited-members:
-   :noindex:
+
+Cartesian impedance
+~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: zero_franky.zmq_client.CartesianImpedanceTrackerProxy
    :members:
    :inherited-members:
-   :noindex:
+
+Torque
+~~~~~~
 
 .. autoclass:: zero_franky.zmq_client.TorqueTrackerProxy
    :members:
    :inherited-members:
-   :noindex:
 
 Value types mirror the `franky` API where applicable. Use the local stand-ins from
 `franky Python API <https://timschneider42.github.io/franky/api/python.html>`_ for type semantics.
