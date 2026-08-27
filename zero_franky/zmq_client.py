@@ -70,7 +70,7 @@ class _TrackerProxy:
     """Client-side handle to a tracker running next to the robot.
 
     Mirrors the surface of `franky`'s in-process tracker classes, so loop bodies
-    written against `franky.JointImpedanceTracker` port over unchanged. The
+    written against :class:`franky.JointImpedanceTracker` port over unchanged. The
     differences are inherent to running over the network: `tick()` learns that
     the controller stopped from the state stream rather than from the robot
     directly (see its docstring), and `motion` cannot be handed back because it
@@ -181,8 +181,7 @@ class _TrackerProxy:
 
         Where franky reads ``robot.is_in_control`` in-process, here we get notified from the state stream, which it starts on first use.
         Until a snapshot confirms the controller is in control, it falls back to a
-        once-a-second `status()` RPC, so a tracker that dies before publishing
-        anything still ends the loop. That also means `tick()` raises whatever the
+        once-a-second `status()` RPC. That also means `tick()` raises whatever the
         state stream raises.
         """
         if self._stopped:
@@ -335,9 +334,11 @@ class _TrackerProxy:
     def stop(self, stop_motion: Any = None, join_timeout: float | None = None, rpc_timeout_ms: int = 30_000):
         """Gracefully stop the tracker and wait for the arm to come to rest.
 
-        Matches `franky`'s tracker `stop()`: the server enqueues a
-        `TorqueStopMotion` ramp and joins it, so this returns once the arm is at
-        rest.
+        Matches the corresponding Franky tracker’s
+        :meth:`franky.JointImpedanceTracker.stop` /
+        :meth:`franky.CartesianImpedanceTracker.stop` behavior: the server enqueues
+        a :class:`franky.TorqueStopMotion` ramp and joins it, so this returns once
+        the arm is at rest.
 
         Since the join blocks on the robot, this call gets its own longer RPC
         timeout. Calling it twice is harmless.
@@ -378,9 +379,8 @@ class JointImpedanceTrackerProxy(_TrackerProxy):
         """Update the joint target position, optional velocity, and optional feedforward torque.
 
         Goes over the conflating tracker socket, so it costs no round trip and a
-        slower update may be dropped in favour of a newer one; `last_reference`
-        reports what the controller actually picked up. Falls back to RPC when
-        the client was set up without a tracker port.
+        slower update may be dropped in favour of a newer one; :attr:`last_reference`
+        reports what the controller actually picked up.
         """
         return self._send_reference(
             "tracker.set_joint_reference",
@@ -392,19 +392,28 @@ class JointImpedanceTrackerProxy(_TrackerProxy):
         )
 
     def set_gains(self, gains=None, *, stiffness=None, damping=None):
-        """Update joint impedance gains, smoothed in the RT loop by the controller.
+        """Update joint impedance gains, smoothed in the RT loop.
 
-        Accepts a `JointImpedanceGains` positionally, or `stiffness`/`damping`
-        keywords, matching `franky.JointImpedanceTracker.set_gains`. Omitted
-        gains keep their current value.
+        ``stiffness`` and ``damping`` are orthogonal 7-vectors. Passing
+        ``damping`` pins it; omitting it means critical damping, while
+        :data:`franky.CRITICAL` explicitly unpins it. A stiffness change
+        therefore re-tracks critical damping unless damping is passed too.
 
-        Damping is all-or-nothing: passing a 7-vector pins it, while omitting it
-        (or passing `franky.CRITICAL`) leaves it unpinned so the controller
-        re-tracks critical damping against the smoothed stiffness every cycle.
-        A stiffness change therefore re-criticals unless damping is passed too.
+        Accepts a :class:`franky.JointImpedanceGains` positionally or
+        ``stiffness``/``damping`` keywords. Omitted stiffness is unchanged;
+        naming neither gain is a no-op.
 
-        Unlike `set_target`, this costs an RPC round trip, so it is not free to
-        call every cycle. Naming no gain at all returns without one.
+        :param gains: Full joint gains; exclusive with ``stiffness`` and
+            ``damping``.
+        :type gains: JointImpedanceGains | None
+        :param stiffness: Seven joint stiffness values.
+        :type stiffness: sequence[float] | None
+        :param damping: Seven joint damping values, or
+            :data:`franky.CRITICAL` to explicitly unpin damping.
+        :type damping: sequence[float] | None
+
+        Unlike ``set_target``, this costs an RPC round trip, so it is not free to
+        call every cycle.
         """
         if gains is not None:
             if stiffness is not None or damping is not None:
@@ -434,13 +443,25 @@ class JointImpedanceTrackerProxy(_TrackerProxy):
     ):
         """Update the hybrid Cartesian gain shaping added on top of the joint-space stiffness.
 
-        Only meaningful when the tracker was started with `cartesian_stiffness`;
-        the hybrid path itself is fixed for the lifetime of the motion. Takes the
-        same arguments as `CartesianImpedanceTrackerProxy.set_gains` minus the
-        nullspace, which a joint tracker has no tasks for.
+        The controller only uses these gains when the tracker was started with
+        ``cartesian_stiffness``. This accepts the same arguments as
+        :meth:`CartesianImpedanceTrackerProxy.set_gains` minus the nullspace.
 
-        Unlike `set_target`, this costs an RPC round trip, so it is not free to
-        call every cycle. Naming no gain at all returns without one.
+        :param gains: Full Cartesian gains; exclusive with the scalar stiffness
+            and damping arguments.
+        :type gains: CartesianImpedanceGains | None
+        :param translational_stiffness: Scalar translational stiffness for the
+            three translational axes.
+        :type translational_stiffness: float | None
+        :param rotational_stiffness: Scalar rotational stiffness for the three
+            rotational axes.
+        :type rotational_stiffness: float | None
+        :param damping: Six damping values in ``[x, y, z, rx, ry, rz]`` order,
+            or :data:`franky.CRITICAL` to explicitly unpin damping.
+        :type damping: sequence[float] | None
+
+        Unlike ``set_target``, this costs an RPC round trip. Naming no gain at
+        all is a no-op.
         """
         payload = _cartesian_gains_payload(gains, translational_stiffness, rotational_stiffness, damping)
         if payload is None:
@@ -455,9 +476,8 @@ class CartesianImpedanceTrackerProxy(_TrackerProxy):
         """Update the Cartesian target pose and optional twist/acceleration feedforward.
 
         Goes over the conflating tracker socket, so it costs no round trip and a
-        slower update may be dropped in favour of a newer one; `last_reference`
-        reports what the controller actually picked up. Falls back to RPC when
-        the client was set up without a tracker port.
+        slower update may be dropped in favour of a newer one; :attr:`last_reference`
+        reports what the controller actually picked up.
         """
         return self._send_reference(
             "tracker.set_cartesian_reference",
@@ -478,25 +498,42 @@ class CartesianImpedanceTrackerProxy(_TrackerProxy):
         posture_stiffness=None,
         nullspace_gains=None,
     ):
-        """Update Cartesian impedance gains, smoothed in the RT loop by the controller.
+        """Update Cartesian impedance gains, smoothed in the RT loop.
 
-        Mirrors `franky.CartesianImpedanceTracker.set_gains`.
-        `translational_stiffness`/`rotational_stiffness` overwrite one stiffness
-        block each, leaving the rest of the matrix (including anisotropy) intact.
-        `gains` total-replaces with a full `CartesianImpedanceGains` and is
-        exclusive with the rest.
+        ``translational_stiffness`` and ``rotational_stiffness`` each set one
+        scalar stiffness block. ``damping`` is a 6-vector in
+        ``[x, y, z, rx, ry, rz]`` order; omitting it means critical damping,
+        while :data:`franky.CRITICAL` explicitly unpins it.
 
-        Damping is all-or-nothing: a 6-vector pins it, while omitting it or
-        passing `franky.CRITICAL` unpins it so the controller re-tracks critical
-        damping. A stiffness change therefore re-criticals unless damping is
-        passed too.
+        ``gains`` total-replaces the full
+        :class:`franky.CartesianImpedanceGains` and is exclusive with the
+        stiffness/damping keywords. ``posture_stiffness`` (a scalar or
+        7-vector) nudges the configured posture task; ``nullspace_gains``
+        replaces the configured posture and manipulability gains. They are
+        mutually exclusive and only affect tasks configured at start.
 
-        For the nullspace, `posture_stiffness` nudges just the posture task's
-        stiffness; `nullspace_gains` replaces the whole `NullspaceGains`. The two
-        are mutually exclusive, and both only retune tasks configured at start.
+        :param gains: Full Cartesian gains; exclusive with the scalar stiffness
+            and damping arguments.
+        :type gains: CartesianImpedanceGains | None
+        :param translational_stiffness: Scalar translational stiffness for the
+            three translational axes.
+        :type translational_stiffness: float | None
+        :param rotational_stiffness: Scalar rotational stiffness for the three
+            rotational axes.
+        :type rotational_stiffness: float | None
+        :param damping: Six damping values in ``[x, y, z, rx, ry, rz]`` order,
+            or :data:`franky.CRITICAL` to explicitly unpin damping.
+        :type damping: sequence[float] | None
+        :param posture_stiffness: Scalar or seven-vector that nudges the
+            configured posture task.
+        :type posture_stiffness: float | sequence[float] | None
+        :param nullspace_gains: Full replacement for configured posture and
+            manipulability gains.
+        :type nullspace_gains: NullspaceGains | None
 
-        Unlike `set_target`, this costs an RPC round trip, so it is not free to
-        call every cycle. Naming no gain at all returns without one.
+        A stiffness change re-tracks critical damping unless ``damping`` is
+        passed. Unlike ``set_target``, this costs an RPC round trip. Naming no
+        gain at all is a no-op.
         """
         if nullspace_gains is not None and posture_stiffness is not None:
             raise ValueError("Pass either nullspace_gains or posture_stiffness, not both")
@@ -550,9 +587,8 @@ class TorqueTrackerProxy(_TrackerProxy):
         """Command raw joint torques. Call faster than the motion's `signal_timeout`.
 
         Goes over the conflating tracker socket, so it costs no round trip and a
-        slower update may be dropped in favour of a newer one; `last_reference`
-        reports what the controller actually picked up. Falls back to RPC when
-        the client was set up without a tracker port.
+        slower update may be dropped in favour of a newer one; :attr:`last_reference`
+        reports what the controller actually picked up.
         """
         return self._send_reference("tracker.set_torque", {"torque": encode_rpc_value(torque)})
 
@@ -560,7 +596,7 @@ class TorqueTrackerProxy(_TrackerProxy):
         """The torque the server most recently handed to the controller.
 
         Costs an RPC round trip; the same value rides the state stream as
-        `last_reference`.
+        :attr:`last_reference`.
         """
         return self._client.call("tracker.get_torque", {"session_id": self._id})
 
@@ -608,6 +644,10 @@ class ZmqRpcClient:
 
 
 class RobotProxy:
+    """Client-side proxy for a robot controlled by a zero-franky server.
+
+    The ``fci_hostname`` is resolved by the server.
+    """
     def __init__(self, fci_hostname: str, *, client: ZmqRpcClient | None = None, **kwargs):
         from zero_franky.setup import cfg
 
@@ -798,7 +838,7 @@ class RobotProxy:
         stop_on_policy_error: bool = True,
         **motion_kwargs,
     ) -> JointImpedanceTrackerProxy:
-        """Start joint impedance tracking, the networked counterpart to `franky.JointImpedanceTracker`.
+        """Start joint impedance tracking, the networked counterpart to :class:`franky.JointImpedanceTracker`.
 
         Without a `policy`, the returned proxy is a passthrough: set references
         from client code with `set_target`. With one, the server runs the policy
@@ -822,7 +862,7 @@ class RobotProxy:
         stop_on_policy_error: bool = True,
         **motion_kwargs,
     ) -> CartesianImpedanceTrackerProxy:
-        """Start Cartesian impedance tracking, the networked counterpart to `franky.CartesianImpedanceTracker`.
+        """Start Cartesian impedance tracking, the networked counterpart to :class:`franky.CartesianImpedanceTracker`.
 
         Starting costs an RPC round trip.
         """

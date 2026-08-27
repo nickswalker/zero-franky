@@ -35,7 +35,8 @@ def _is_preemption_exception(franky: Any, exc: BaseException) -> bool:
 
     Mirrors franky's own check (`franky.tracker._is_premption_exception`): a
     `ControlException` whose message names a preempted move command. A graceful
-    `TorqueStopMotion` finishes without one, so this stays a defensive fallback
+    :class:`franky.TorqueStopMotion` finishes without one, so this stays a defensive
+    fallback
     for control ending abruptly before the stop could be enqueued.
     """
     control_exception = getattr(franky, "ControlException", None)
@@ -143,8 +144,9 @@ class TrackerSession:
     def stop(self, join_timeout: float | None = None, stop_motion: Any = None):
         """Gracefully stop the tracker and wait for the arm to come to rest.
 
-        Follows `franky`'s tracker `stop()`: enqueue a `TorqueStopMotion` that
-        ramps the last commanded torque into a damping-only law, then join the
+        Follows the corresponding Franky tracker’s
+        :meth:`franky.JointImpedanceTracker.stop` /
+        :meth:`franky.CartesianImpedanceTracker.stop` behavior: enqueue a
         motion. `join_timeout=None` blocks until the arm is at rest, as franky
         does; a float caps the wait, in which case the ramp may still be running
         when this returns.
