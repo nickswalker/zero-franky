@@ -266,7 +266,7 @@ class _TrackerProxy:
         """Latest robot state, read from the state PUB stream rather than by RPC.
 
         Unlike `franky`'s `tracker.state` this is the msgpack snapshot dict, not a
-        `RobotState`. The background stream starts on first access, so this is
+        :class:`franky.RobotState`. The background stream starts on first access, so this is
         None until the first snapshot lands; use `robot.wait_for_state()` to
         block for it.
         """
