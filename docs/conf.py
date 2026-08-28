@@ -18,6 +18,11 @@ myst_heading_anchors = 3
 
 exclude_patterns = ["_build"]
 html_theme = "furo"
+html_theme_options = {
+    "source_repository": "https://github.com/nickswalker/zero-franky",
+    "source_branch": "master",
+    "source_directory": "docs/",
+}
 
 intersphinx_mapping = {
     "franky": ("https://timschneider42.github.io/franky/", None),

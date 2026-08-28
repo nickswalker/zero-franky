@@ -1,8 +1,9 @@
-# zero-franky
-
-Use [`franky`](https://github.com/TimSchneider42/franky) from another process over ZeroMQ.
+```{include} ../README.md
+:parser: myst_parser.sphinx_
+```
 
 ```{toctree}
+:hidden:
 :maxdepth: 1
 
 getting-started
