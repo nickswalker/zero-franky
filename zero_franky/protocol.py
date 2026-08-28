@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 import uuid
 
@@ -621,6 +623,141 @@ def encode_motion_reference(motion: Any) -> dict[str, Any] | None:
         return {"type": "Torque", "tau": encode_vector(get_torque())}
     return None
 
+#: All RobotState fields supported by the full state profile.
+FULL_STATE_FIELDS = (
+    "EE_T_K",
+    "F_T_EE",
+    "F_T_NE",
+    "F_x_Cee",
+    "F_x_Cload",
+    "F_x_Ctotal",
+    "I_ee",
+    "I_load",
+    "I_total",
+    "K_F_ext_hat_K",
+    "NE_T_EE",
+    "O_F_ext_hat_K",
+    "O_T_EE",
+    "O_T_EE_c",
+    "O_T_EE_d",
+    "O_dP_EE_c",
+    "O_dP_EE_d",
+    "O_dP_EE_est",
+    "O_ddP_EE_c",
+    "O_ddP_EE_est",
+    "O_ddP_O",
+    "cartesian_collision",
+    "cartesian_contact",
+    "control_command_success_rate",
+    "current_errors",
+    "ddelbow_c",
+    "ddelbow_est",
+    "ddq_d",
+    "ddq_est",
+    "delbow_c",
+    "delbow_est",
+    "dq",
+    "dq_d",
+    "dq_est",
+    "dtau_J",
+    "dtheta",
+    "elbow",
+    "elbow_c",
+    "elbow_d",
+    "joint_collision",
+    "joint_contact",
+    "last_motion_errors",
+    "m_ee",
+    "m_load",
+    "m_total",
+    "q",
+    "q_d",
+    "q_est",
+    "robot_mode",
+    "tau_J",
+    "tau_J_d",
+    "tau_ext_hat_filtered",
+    "theta",
+    "time",
+)
+
+#: Fields emitted by the default fast state profile.
+FAST_STATE_FIELDS = (
+    "q",
+    "dq",
+    "O_T_EE",
+    "O_F_ext_hat_K",
+    "K_F_ext_hat_K",
+    "tau_ext_hat_filtered",
+    "O_dP_EE_est",
+    "time_step",
+    "rel_time",
+    "abs_time",
+    "control_signal",
+)
+_SUPPORTED_STATE_FIELDS = frozenset((*FULL_STATE_FIELDS, "time_step", "rel_time", "abs_time", "control_signal"))
+
+
+def normalize_state_fields(fields: Sequence[str] | str | None) -> tuple[str, ...] | None:
+    """Resolve the fast/full profiles or validate a custom field sequence."""
+    if fields is None or fields == "fast":
+        return None
+    if fields == "full":
+        return FULL_STATE_FIELDS
+    if isinstance(fields, str):
+        raise TypeError("state_fields must be 'fast', 'full', or a sequence of field names")
+    if any(not isinstance(field, str) for field in fields):
+        raise TypeError("state_fields must contain only strings")
+    selected = tuple(dict.fromkeys(fields))
+    unknown = sorted(set(selected) - _SUPPORTED_STATE_FIELDS)
+    if unknown:
+        raise ValueError(f"Unsupported state fields: {', '.join(unknown)}")
+    return selected
+
+
+def _encode_state_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, bytes, bool, int, float)):
+        return value
+    if isinstance(value, Enum):
+        return value.name
+    if isinstance(value, dict):
+        return {str(key): _encode_state_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_encode_state_value(item) for item in value]
+    to_sec = getattr(value, "to_sec", None)
+    if callable(to_sec):
+        return float(to_sec())
+    matrix = getattr(value, "matrix", None)
+    if matrix is not None:
+        return encode_matrix(matrix)
+    linear = getattr(value, "linear", None)
+    angular = getattr(value, "angular", None)
+    if linear is not None and angular is not None:
+        return [float(item) for item in linear] + [float(item) for item in angular]
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        return _encode_state_value(tolist())
+    item = getattr(value, "item", None)
+    if callable(item):
+        return _encode_state_value(item())
+    name = getattr(value, "name", None)
+    if isinstance(name, str):
+        return name
+    properties = {}
+    for field in dir(type(value)):
+        if field.startswith("_") or not isinstance(getattr(type(value), field, None), property):
+            continue
+        try:
+            properties[field] = _encode_state_value(getattr(value, field))
+        except Exception:
+            continue
+    if properties:
+        return properties
+    try:
+        return [_encode_state_value(item) for item in value]
+    except TypeError:
+        return repr(value)
+
 
 def encode_callback_state(
     robot_state: Any,
@@ -628,20 +765,35 @@ def encode_callback_state(
     rel_time: Any,
     abs_time: Any,
     control_signal: Any,
+    fields: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    return {
-        "q": [float(value) for value in robot_state.q],
-        "dq": [float(value) for value in robot_state.dq],
-        "O_T_EE": [[float(value) for value in row] for row in robot_state.O_T_EE.matrix],
-        "O_F_ext_hat_K": [float(value) for value in robot_state.O_F_ext_hat_K],
-        "K_F_ext_hat_K": [float(value) for value in robot_state.K_F_ext_hat_K],
-        "tau_ext_hat_filtered": [float(value) for value in robot_state.tau_ext_hat_filtered],
-        "O_dP_EE_est": _safe_twist(robot_state, "O_dP_EE_est"),
-        "time_step": float(time_step.to_sec()),
-        "rel_time": float(rel_time.to_sec()),
-        "abs_time": float(abs_time.to_sec()),
-        "control_signal": _encode_control_signal(control_signal),
-    }
+    if fields is None:
+        return {
+            "q": [float(value) for value in robot_state.q],
+            "dq": [float(value) for value in robot_state.dq],
+            "O_T_EE": [[float(value) for value in row] for row in robot_state.O_T_EE.matrix],
+            "O_F_ext_hat_K": [float(value) for value in robot_state.O_F_ext_hat_K],
+            "K_F_ext_hat_K": [float(value) for value in robot_state.K_F_ext_hat_K],
+            "tau_ext_hat_filtered": [float(value) for value in robot_state.tau_ext_hat_filtered],
+            "O_dP_EE_est": _safe_twist(robot_state, "O_dP_EE_est"),
+            "time_step": float(time_step.to_sec()),
+            "rel_time": float(rel_time.to_sec()),
+            "abs_time": float(abs_time.to_sec()),
+            "control_signal": _encode_control_signal(control_signal),
+        }
+
+    payload: dict[str, Any] = {}
+    for field in fields:
+        if field in ("time_step", "rel_time", "abs_time"):
+            value = {"time_step": time_step, "rel_time": rel_time, "abs_time": abs_time}[field]
+            payload[field] = float(value.to_sec())
+        elif field == "control_signal":
+            payload[field] = _encode_control_signal(control_signal)
+        elif field == "O_dP_EE_est":
+            payload[field] = _safe_twist(robot_state, field)
+        else:
+            payload[field] = _encode_state_value(getattr(robot_state, field))
+    return payload
 
 
 def _encode_control_signal(control_signal: Any):

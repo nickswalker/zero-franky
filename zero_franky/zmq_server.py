@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
 import threading
 import uuid
 
 import msgpack
 import zmq
 
-from zero_franky.protocol import format_exception
+from zero_franky.protocol import format_exception, normalize_state_fields
 
 
 RPC_HANDLERS = {}
@@ -29,10 +29,11 @@ def rpc_handler(method: str):
 
 
 class RobotManager:
-    def __init__(self, state_publisher=None):
+    def __init__(self, state_publisher=None, state_fields: Sequence[str] | str | None = None):
         import franky
 
         self._franky = franky
+        self._state_fields = normalize_state_fields(state_fields)
         self._state_publisher = state_publisher
         self._robots: dict[str, Any] = {}
         self._latest_state: dict[str, dict[str, Any]] = {}
@@ -302,7 +303,9 @@ class RobotManager:
         robot = self._robot(robot_id)
 
         def callback(robot_state, time_step, rel_time, abs_time, control_signal):
-            payload = encode_callback_state(robot_state, time_step, rel_time, abs_time, control_signal)
+            payload = encode_callback_state(
+                robot_state, time_step, rel_time, abs_time, control_signal, fields=self._state_fields
+            )
             payload["robot_id"] = robot_id
             payload["in_control"] = bool(getattr(robot, "is_in_control", True))
             # Wait-free on the motion's side, so safe on the control thread.
@@ -376,17 +379,21 @@ class ZmqRobotServer:
         bind: str = "tcp://0.0.0.0:18812",
         pub_bind: str | None = "tcp://0.0.0.0:18813",
         tracker_bind: str | None = None,
+        state_fields: Sequence[str] | str | None = None,
         manager: RobotManager | None = None,
     ):
         self._context = zmq.Context.instance()
         self._socket = self._context.socket(zmq.REP)
         self._socket.setsockopt(zmq.RCVTIMEO, 200)
         self._socket.bind(bind)
-        if manager is None and pub_bind is not None:
+        if manager is None:
             from zero_franky.pubsub import StatePublisher
 
-            manager = RobotManager(StatePublisher(pub_bind))
-        self._manager = manager or RobotManager()
+            publisher = None if pub_bind is None else StatePublisher(pub_bind)
+            manager = RobotManager(publisher, state_fields=state_fields)
+        elif state_fields is not None:
+            raise ValueError("state_fields must be configured on the supplied RobotManager")
+        self._manager = manager
         self._tracker_listener = (
             _TrackerUpdateListener(tracker_bind, self._manager) if tracker_bind is not None else None
         )

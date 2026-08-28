@@ -15,9 +15,24 @@ def tcp_endpoint(host: str, port: int) -> str:
     return f"tcp://{host}:{port}"
 
 
+def _parse_state_fields(value: str) -> tuple[str, ...] | str:
+    if value in ("fast", "full"):
+        return value
+    fields = tuple(field.strip() for field in value.split(",") if field.strip())
+    if not fields:
+        raise argparse.ArgumentTypeError("state fields must not be empty")
+    return fields
+
+
 def add_server_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--host", default=DEFAULT_HOST, help=f"Interface to bind RPC/PUB sockets on [{DEFAULT_HOST}]")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"RPC port [{DEFAULT_PORT}]")
+    parser.add_argument(
+        "--state-fields",
+        type=_parse_state_fields,
+        metavar="PROFILE|FIELD,...",
+        help="State profile: fast (default), full, or a comma-separated field list",
+    )
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -37,7 +52,7 @@ def build_server(args: argparse.Namespace):
     print(f"zero_franky state pub on {pub_bind}", flush=True)
     print(f"zero_franky tracker updates on {tracker_bind}", flush=True)
 
-    return ZmqRobotServer(bind=bind, pub_bind=pub_bind, tracker_bind=tracker_bind)
+    return ZmqRobotServer(bind=bind, pub_bind=pub_bind, tracker_bind=tracker_bind, state_fields=args.state_fields)
 
 
 def run(args: argparse.Namespace) -> int:

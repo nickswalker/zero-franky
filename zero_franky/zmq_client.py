@@ -269,6 +269,15 @@ class _TrackerProxy:
         :class:`franky.RobotState`. The background stream starts on first access, so this is
         None until the first snapshot lands; use `robot.wait_for_state()` to
         block for it.
+
+        The snapshot contains :attr:`~franky.RobotState.q`/:attr:`~franky.RobotState.dq`
+        (7-vectors), :attr:`~franky.RobotState.O_T_EE` (4x4),
+        :attr:`~franky.RobotState.O_F_ext_hat_K`, :attr:`~franky.RobotState.K_F_ext_hat_K`,
+        :attr:`~franky.RobotState.tau_ext_hat_filtered`, and
+        :attr:`~franky.RobotState.O_dP_EE_est` (a 6-vector or empty), plus
+        ``time_step``, ``rel_time``, ``abs_time``, ``control_signal``,
+        ``robot_id``, ``in_control``, and ``reference``. The ``control_signal``
+        and ``reference`` payloads are motion-specific dictionaries.
         """
         if self._robot is None:
             raise RuntimeError("This proxy was constructed without a robot; state is unavailable")
