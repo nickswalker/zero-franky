@@ -7,7 +7,7 @@ import uuid
 import msgpack
 import zmq
 
-from zero_franky.protocol import format_exception, normalize_state_fields
+from zero_franky.protocol import encode_affine, format_exception, normalize_state_fields
 
 
 RPC_HANDLERS = {}
@@ -44,6 +44,14 @@ class RobotManager:
         robot_id = uuid.uuid4().hex
         self._robots[robot_id] = self._franky.Robot(fci_hostname, **(kwargs or {}))
         return robot_id
+
+    def kinematics_info(self, robot_id: str):
+        """Return the fixed EE transform and an initial joint seed for local IK."""
+        state = self._robot(robot_id).state()
+        return {
+            "f_t_ee": encode_affine(state.F_T_EE),
+            "q": [float(value) for value in state.q],
+        }
 
     def _robot(self, robot_id: str):
         try:
@@ -446,6 +454,11 @@ class ZmqRobotServer:
 @rpc_handler("robot.create")
 def handle_robot_create(manager: RobotManager, params: dict[str, Any]):
     return manager.create_robot(params["fci_hostname"], params.get("kwargs"))
+
+
+@rpc_handler("robot.kinematics_info")
+def handle_robot_kinematics_info(manager: RobotManager, params: dict[str, Any]):
+    return manager.kinematics_info(params["robot_id"])
 
 
 @rpc_handler("robot.recover_from_errors")

@@ -32,6 +32,32 @@ robot.join_motion()
 `Robot` is a proxy. Motions are encoded into compact [msgpack](https://msgpack.org/index.html) payloads, and the server reconstructs real `franky` objects next to the robot. You can also pass most objects from `franky` straight into zero franky and they'll serialize the same way.
 
 
+### Local analytical IK
+
+If an IK-capable local `franky-control` installation is available, `Robot`
+also exposes `inverse_kinematics` and `inverse_kinematics_nearest`. The solver
+runs in the client process and does not add an RPC per solve:
+
+```python
+import franky
+from zero_franky.types import Affine
+
+target = Affine([0.4, 0.0, 0.5])
+solutions = robot.inverse_kinematics(
+    target,
+    redundancy_value=0.0,
+    parameter=franky.kinematics.RedundancyParameter.Q7,
+)
+q = robot.inverse_kinematics_nearest(target, max_distance=0.2)
+```
+
+At construction, the proxy caches the server robot's flange-to-end-effector
+transform and an initial joint configuration. Nearest IK uses the latest
+state-stream joint positions when available, so its seed may be stale; pass
+`q_seed` explicitly when that matters. The local solver uses nominal Franka
+geometry and the cached transform, not the server's live robot model.
+
+
 ## Server
 
 On the robot host:

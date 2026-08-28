@@ -30,6 +30,47 @@ _MIN_DT = 1e-9
 _PROBE_INTERVAL = 1.0
 
 
+class LocalIKUnavailable(RuntimeError):
+    """Raised when local analytical IK is not available on the client."""
+
+
+def _load_local_kinematics():
+    try:
+        import importlib
+        import franky
+    except Exception as exc:
+        raise LocalIKUnavailable(
+            "Local analytical IK requires an IK-capable franky-control installation"
+        ) from exc
+
+    kinematics = getattr(franky, "kinematics", None)
+    if kinematics is None:
+        try:
+            kinematics = importlib.import_module("franky.kinematics")
+        except ModuleNotFoundError:
+            extension = importlib.import_module("franky._franky")
+            kinematics = getattr(extension, "kinematics", None)
+            if kinematics is None:
+                # Accept the pre-namespace binding while applications migrate
+                # to franky.kinematics.
+                kinematics = extension
+    required = ("inverse_kinematics", "inverse_kinematics_nearest")
+    if not all(callable(getattr(kinematics, name, None)) for name in required):
+        raise LocalIKUnavailable(
+            "The installed franky-control does not provide analytical kinematics"
+        )
+    return franky, kinematics
+
+
+def _local_affine(franky, value):
+    if isinstance(value, franky.Affine):
+        return value
+    matrix = getattr(value, "matrix", value)
+    import numpy as np
+
+    return franky.Affine(transformation_matrix=np.asarray(matrix, dtype=float))
+
+
 def encode_policy(policy, transport: PolicyTransport = "import") -> dict[str, Any]:
     if transport == "import":
         module = inspect.getmodule(policy)
@@ -658,7 +699,10 @@ class ZmqRpcClient:
 class RobotProxy:
     """Client-side proxy for a robot controlled by a zero-franky server.
 
-    The ``fci_hostname`` is resolved by the server.
+    The ``fci_hostname`` is resolved by the server. If an IK-capable local
+    ``franky`` installation is present, the proxy caches the server's
+    flange-to-end-effector transform and initial joint positions so its
+    analytical IK convenience methods can run without an RPC per solve.
     """
     def __init__(self, fci_hostname: str, *, client: ZmqRpcClient | None = None, **kwargs):
         from zero_franky.setup import cfg
@@ -675,6 +719,22 @@ class RobotProxy:
                 self._push_socket = push
         self._client = client
         self._id = self._client.call("robot.create", {"fci_hostname": fci_hostname, "kwargs": kwargs})
+        self._local_kinematics = None
+        self._f_t_ee: Affine | None = None
+        self._initial_q: list[float] | None = None
+        try:
+            self._local_franky, self._local_kinematics = _load_local_kinematics()
+        except LocalIKUnavailable as exc:
+            self._local_franky = None
+            self._local_kinematics_error = exc
+        else:
+            try:
+                self._refresh_kinematics_info()
+            except RpcError:
+                # Keep robot creation compatible with servers predating the
+                # optional metadata endpoint. The IK call retries and reports
+                # the server error if metadata remains unavailable.
+                pass
         self._state_condition = threading.Condition()
         self._latest_state: dict[str, Any] | None = None
         self._state_stream_error: Exception | None = None
@@ -769,6 +829,93 @@ class RobotProxy:
         with self._state_condition:
             self._state_stream_error = exc
             self._state_condition.notify_all()
+
+    def _refresh_kinematics_info(self) -> None:
+        info = self._client.call("robot.kinematics_info", {"robot_id": self._id})
+        try:
+            matrix = info["f_t_ee"]["matrix"]
+            q = [float(value) for value in info["q"]]
+            if len(q) != 7:
+                raise ValueError("initial q must have seven elements")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RpcError("robot.kinematics_info returned an invalid payload") from exc
+        self._f_t_ee = Affine(transformation_matrix=matrix)
+        self._initial_q = q
+        self._kinematics_info_error = None
+
+    def _require_local_kinematics(self):
+        if self._local_kinematics is None:
+            try:
+                self._local_franky, self._local_kinematics = _load_local_kinematics()
+            except LocalIKUnavailable:
+                raise self._local_kinematics_error
+        if self._f_t_ee is None:
+            self._refresh_kinematics_info()
+        return self._local_franky, self._local_kinematics
+
+    def _local_ik_options(self, options):
+        if options is None:
+            return self._local_kinematics.IKOptions()
+        return options
+
+    def _local_redundancy_parameter(self, parameter):
+        if parameter is None:
+            return self._local_kinematics.RedundancyParameter.Q7
+        if isinstance(parameter, str):
+            return getattr(self._local_kinematics.RedundancyParameter, parameter)
+        return parameter
+
+    def _known_joint_positions(self) -> list[float] | None:
+        state = self.latest_state
+        if state is not None and state.get("q") is not None:
+            return state["q"]
+        return self._initial_q
+
+    def inverse_kinematics(self, o_t_ee, redundancy_value, parameter=None, options=None):
+        """Run local analytical IK using this robot's cached EE transform.
+
+        Requires an IK-capable local ``franky-control`` installation. The
+        transform is fetched once from the server when the proxy is created,
+        while the solve itself performs no RPC.
+        """
+        local_franky, kinematics = self._require_local_kinematics()
+        return kinematics.inverse_kinematics(
+            _local_affine(local_franky, o_t_ee),
+            redundancy_value,
+            parameter=self._local_redundancy_parameter(parameter),
+            f_t_ee=_local_affine(local_franky, self._f_t_ee),
+            options=self._local_ik_options(options),
+        )
+
+    def inverse_kinematics_nearest(
+        self,
+        o_t_ee,
+        q_seed=None,
+        options=None,
+        redundancy_value=None,
+        parameter=None,
+        max_distance=None,
+    ):
+        """Run local nearest-branch IK using the best known joint seed.
+
+        When ``q_seed`` is omitted, the latest streamed joint positions are
+        used, falling back to the positions captured during proxy creation.
+        The seed may be stale because it is not read synchronously from the
+        robot.
+        """
+        local_franky, kinematics = self._require_local_kinematics()
+        seed = self._known_joint_positions() if q_seed is None else q_seed
+        if seed is None:
+            raise RuntimeError("No joint seed is available for local nearest IK; pass q_seed explicitly")
+        return kinematics.inverse_kinematics_nearest(
+            _local_affine(local_franky, o_t_ee),
+            seed,
+            f_t_ee=_local_affine(local_franky, self._f_t_ee),
+            options=self._local_ik_options(options),
+            redundancy_value=redundancy_value,
+            parameter=self._local_redundancy_parameter(parameter),
+            max_distance=max_distance,
+        )
 
     def recover_from_errors(self):
         """Clear the robot's error state so it will accept motions again.
